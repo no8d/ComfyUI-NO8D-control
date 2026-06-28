@@ -98,10 +98,16 @@ function searchableSelect(options, value, placeholder = "") {
     ].join(";");
     const list = document.createElement("select");
     list.size = Math.min(8, Math.max(2, options.length));
-    list.style.cssText = "width:100%; min-width:0; min-height:36px; max-height:210px; border:1px solid var(--border-color,#444); border-radius:6px; background:var(--comfy-input-bg,#111); color:var(--input-text,#eee); padding:4px 6px; box-sizing:border-box;";
+    list.style.cssText = "display:none; width:100%; min-width:0; min-height:36px; max-height:210px; border:1px solid var(--border-color,#444); border-radius:6px; background:var(--comfy-input-bg,#111); color:var(--input-text,#eee); padding:4px 6px; box-sizing:border-box;";
     let selected = value || options[0] || "";
+    let open = false;
+    const setOpen = (value) => {
+        open = value;
+        list.style.display = open ? "block" : "none";
+    };
     const render = () => {
-        const query = search.value.trim().toLowerCase();
+        const queryText = search.value.trim();
+        const query = queryText && queryText !== selected ? queryText.toLowerCase() : "";
         const filtered = options.filter((name) => String(name).toLowerCase().includes(query));
         list.replaceChildren();
         for (const name of filtered) {
@@ -115,13 +121,20 @@ function searchableSelect(options, value, placeholder = "") {
         } else if (filtered.length) {
             list.value = filtered[0];
         }
+        setOpen(open && filtered.length > 0);
     };
     search.placeholder = selected || placeholder || t("searchModel");
+    search.value = selected;
+    search.addEventListener("focus", () => {
+        setOpen(options.length > 0);
+        render();
+    });
     search.addEventListener("input", render);
     list.addEventListener("change", () => {
         selected = list.value;
         search.value = selected;
         wrap.onchange?.(selected);
+        setOpen(false);
     });
     search.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
@@ -130,7 +143,11 @@ function searchableSelect(options, value, placeholder = "") {
             selected = list.value;
             search.value = selected;
             wrap.onchange?.(selected);
+            setOpen(false);
         }
+    });
+    search.addEventListener("blur", () => {
+        window.setTimeout(() => setOpen(false), 120);
     });
     wrap.value = () => selected;
     wrap.append(search, list);
@@ -499,7 +516,8 @@ function showApiManager(initialConfig, onSaved) {
             normalizeModels(service);
             const selectedName = service.models?.[0]?.name || "";
             const fetched = state.modelLists[service.id] || [];
-            const options = fetched.length ? fetched : (selectedName ? [selectedName] : []);
+            const saved = service.model_options || [];
+            const options = fetched.length ? fetched : (saved.length ? saved : (selectedName ? [selectedName] : []));
             if (!options.length) {
                 const empty = document.createElement("div");
                 empty.textContent = t("noModelsConfigured");
@@ -526,6 +544,7 @@ function showApiManager(initialConfig, onSaved) {
                 });
                 toast("success", t("apiValidated"), result.message || "");
                 state.modelLists[service.id] = result.models || [];
+                service.model_options = state.modelLists[service.id];
                 const currentName = service.models?.[0]?.name || "";
                 if ((!currentName || !state.modelLists[service.id].includes(currentName)) && state.modelLists[service.id][0]) {
                     setSelectedModel(service, state.modelLists[service.id][0]);
