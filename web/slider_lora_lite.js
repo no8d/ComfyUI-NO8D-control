@@ -285,6 +285,42 @@ function seedControlOptions(widget) {
     return widget?.options?.values || ["fixed", "increment", "decrement", "randomize"];
 }
 
+function randomSeedValue() {
+    if (globalThis.crypto?.getRandomValues) {
+        const values = new Uint32Array(2);
+        globalThis.crypto.getRandomValues(values);
+        return ((values[0] & 0x1fffff) * 0x100000000) + values[1];
+    }
+    return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+}
+
+function nextSeedValue(seed, mode) {
+    const current = Number(seed);
+    const value = Number.isFinite(current) ? Math.max(0, Math.floor(current)) : 0;
+    if (mode === "randomize") return randomSeedValue();
+    if (mode === "increment") return value + 1;
+    if (mode === "decrement") return Math.max(0, value - 1);
+    return value;
+}
+
+function updateLiteSeedBeforeQueue(node) {
+    const seed = seedWidget(node);
+    const control = seedControlWidget(node);
+    if (!seed || !control) return;
+    const mode = String(control.value || "fixed");
+    if (mode === "fixed") return;
+    setWidget(seed, nextSeedValue(seed.value, mode));
+    syncLiteSeedControls(node);
+}
+
+function updateAllLiteSeedsBeforeQueue() {
+    for (const node of app?.graph?._nodes || []) {
+        if (node?.type === NODE_NAME || node?.comfyClass === NODE_NAME) {
+            updateLiteSeedBeforeQueue(node);
+        }
+    }
+}
+
 function syncSeedLockButton(node) {
     const button = node?._liteSeedLock;
     const widget = seedControlWidget(node);
@@ -1173,6 +1209,14 @@ function attach(node) {
 app.registerExtension({
     name: "NO8D.Control.Inpainting",
     async setup() {
+        if (typeof app.graphToPrompt === "function" && !app.graphToPrompt._no8dLiteSeedWrapped) {
+            const originalGraphToPrompt = app.graphToPrompt;
+            app.graphToPrompt = async function () {
+                updateAllLiteSeedsBeforeQueue();
+                return originalGraphToPrompt.apply(this, arguments);
+            };
+            app.graphToPrompt._no8dLiteSeedWrapped = true;
+        }
         setTimeout(() => {
             for (const node of app?.graph?._nodes || []) {
                 if (node?.type === NODE_NAME || node?.comfyClass === NODE_NAME) {
