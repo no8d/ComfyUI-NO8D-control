@@ -177,6 +177,11 @@ function ruleItems(config) {
     });
 }
 
+function ruleDisplayName(ruleName) {
+    const builtin = RULES.find((rule) => rule.value === ruleName);
+    return builtin ? t(builtin.labelKey) : ruleName;
+}
+
 function saveConfig(config) {
     return fetchJson("/prompt/config", {
         method: "POST",
@@ -296,7 +301,7 @@ function showRuleManager(initialConfig, onSaved) {
         const activeItem = ruleItems(config).find((item) => item.value === active);
         const meta = document.createElement("div");
         meta.style.cssText = "display:grid; grid-template-columns:minmax(0, 1fr) minmax(140px, 180px); gap:10px; align-items:end; min-width:0;";
-        const nameField = field(t("ruleName"), active);
+        const nameField = field(t("ruleName"), ruleDisplayName(active));
         nameField.input.disabled = !!activeItem?.builtin;
         const modeSelect = select([
             { value: "natural", label: t("ruleModeNatural") },
