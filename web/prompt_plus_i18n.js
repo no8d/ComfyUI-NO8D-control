@@ -103,7 +103,7 @@ function localizeComboOptions(widget, displayMap) {
     widget.value = localizeOptionValue(widget.value, displayMap);
     const values = widget.options?.values;
     if (Array.isArray(values)) {
-        widget.options.values = values.map((value) => localizeOptionValue(value, displayMap));
+        widget.options.values = [...new Set(values.map((value) => localizeOptionValue(value, displayMap)))];
     }
 }
 

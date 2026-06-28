@@ -48,6 +48,7 @@ _STYLE_PRESET_ALIASES = {
     "3D realism": "3d写实",
     "3D cartoon": "3d卡通",
 }
+_STYLE_PRESET_INPUTS = _STYLE_PRESETS + tuple(_STYLE_PRESET_ALIASES.keys())
 _STYLE_PRESET_RULES = {
     "业余摄影": "Use a clearly amateur smartphone-photography look. Preserve the visible subject, clothing, styling, and setting, but describe the capture quality as rough and phone-made rather than polished. The final output must include common modern English cues such as phone photo, casual snapshot, handheld framing, available light, spontaneous moment, everyday setting, natural colors, uneven exposure, slight motion blur, phone-camera noise, limited dynamic range, compressed detail, imperfect focus, and believable everyday flaws when appropriate. Make it feel like a real mobile-phone capture or casual social-media photo, not a DSLR shoot, studio setup, commercial advertisement, or polished cinematic still.",
     "专业摄影": "Use a professional photography look: DSLR or mirrorless camera quality, refined commercial/editorial composition, controlled lighting, crisp lens rendering, polished color grading, and high-end advertising or fashion-shoot detail.",
@@ -420,10 +421,14 @@ class NO8DPromptPlus:
 
     @classmethod
     def INPUT_TYPES(cls):
+        prompt_rule_names = prompt_config_manager.prompt_rule_names()
+        prompt_rule_inputs = prompt_rule_names + [
+            name for name in ("Natural language", "JSON structure") if name not in prompt_rule_names
+        ]
         return {
             "required": {
-                "prompt_rules": (prompt_config_manager.prompt_rule_names(), {"default": _RULE_NATURAL}),
-                "style_preset": (_STYLE_PRESETS, {"default": "专业摄影"}),
+                "prompt_rules": (prompt_rule_inputs, {"default": _RULE_NATURAL}),
+                "style_preset": (_STYLE_PRESET_INPUTS, {"default": "专业摄影"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True}),
                 "extra_rules": ("STRING", {"default": "", "multiline": True}),
             },
