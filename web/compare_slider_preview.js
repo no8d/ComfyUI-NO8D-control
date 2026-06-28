@@ -1,12 +1,19 @@
 import { app } from "../../scripts/app.js";
 
 const NODE_NAME = "NO8DABPreview";
+const MIN_WIDTH = 260;
 const MIN_HEIGHT = 320;
 const HISTORY_LIMIT = 8;
+const HISTORY_STORAGE_KEY = "NO8D_AB_PREVIEW_HISTORY";
+
+function widgetHeightForNode(node) {
+    const nodeHeight = Number(node?.size?.[1] || 0);
+    return Math.max(nodeHeight - 70, MIN_HEIGHT);
+}
 
 const passThroughStyle = document.createElement("style");
 passThroughStyle.textContent = `
-    .dom-widget.no8d-compare-widget { pointer-events: none !important; }
+    .dom-widget.no8d-compare-fit-widget { pointer-events: none !important; box-sizing: border-box; overflow: hidden; }
     .no8d-compare-control { pointer-events: auto; }
 `;
 document.head.appendChild(passThroughStyle);
@@ -78,12 +85,18 @@ function makeViewUrl(ref) {
 }
 
 function loadHistory() {
-    return [];
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
+        return previewImageRefs(parsed).slice(-HISTORY_LIMIT);
+    } catch (_) {
+        return [];
+    }
 }
 
 function saveHistory(history) {
-    // Compare history is session-only. PreviewImage returns temp refs, so persisting
-    // them across browser or ComfyUI restarts would create stale thumbnails.
+    try {
+        sessionStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(previewImageRefs(history).slice(-HISTORY_LIMIT)));
+    } catch (_) {}
 }
 
 function rememberHistory(node, refs) {
@@ -104,10 +117,23 @@ function rememberHistory(node, refs) {
 function setImage(img, ref) {
     if (!img) return;
     if (ref?.filename) {
+        const key = imageKey(ref);
+        if (img._no8dLoadedKey !== key || !img.complete) {
+            img.style.visibility = "hidden";
+        }
+        img.onload = () => {
+            img.style.visibility = "visible";
+            img._no8dLoadedKey = key;
+        };
         img.src = makeViewUrl(ref);
+        if (img.complete) {
+            img.style.visibility = "visible";
+            img._no8dLoadedKey = key;
+        }
         img.style.display = "block";
     } else {
         img.removeAttribute("src");
+        img.style.visibility = "hidden";
         img.style.display = "none";
     }
 }
@@ -178,9 +204,11 @@ async function createCompareWidget(node) {
     const root = document.createElement("div");
     root.style.cssText = [
         "width:100%",
+        "max-width:100%",
         "height:100%",
         "position:relative",
         "box-sizing:border-box",
+        "overflow:hidden",
         "pointer-events:none",
     ].join(";");
     root.dataset.no8dCompareRoot = "1";
@@ -190,6 +218,8 @@ async function createCompareWidget(node) {
     panel.style.cssText = [
         "position:absolute",
         "inset:0",
+        "width:100%",
+        "height:100%",
         "display:flex",
         "flex-direction:column",
         "background:#101010",
@@ -229,6 +259,7 @@ async function createCompareWidget(node) {
         "width:100%",
         "height:100%",
         "object-fit:contain",
+        "object-position:center",
         "user-select:none",
         "pointer-events:none",
     ].join(";");
@@ -251,6 +282,7 @@ async function createCompareWidget(node) {
         "width:100%",
         "height:100%",
         "object-fit:contain",
+        "object-position:center",
         "user-select:none",
         "pointer-events:none",
     ].join(";");
@@ -406,7 +438,20 @@ async function createCompareWidget(node) {
         afterResize: () => renderCompare(node),
     });
     widget.serialize = false;
-    const markWrapper = () => root.closest(".dom-widget")?.classList.add("no8d-compare-widget");
+    widget.computeSize = (width) => [Math.max(width || MIN_WIDTH, MIN_WIDTH), widgetHeightForNode(node)];
+    if (typeof node.setSize === "function" && (!node.size || node.size[0] < MIN_WIDTH || node.size[1] < MIN_HEIGHT + 40)) {
+        node.setSize([Math.max(node.size?.[0] || 0, MIN_WIDTH), Math.max(node.size?.[1] || 0, MIN_HEIGHT + 70)]);
+    }
+    const markWrapper = () => {
+        const wrapper = root.closest(".dom-widget");
+        if (!wrapper) return;
+        wrapper.classList.remove("no8d-compare-widget");
+        wrapper.classList.add("no8d-compare-fit-widget");
+        if (wrapper.style.width === "100%") wrapper.style.width = "";
+        if (wrapper.style.maxWidth === "100%") wrapper.style.maxWidth = "";
+        wrapper.style.boxSizing = "border-box";
+        wrapper.style.overflow = "hidden";
+    };
     markWrapper();
     requestAnimationFrame(markWrapper);
 
@@ -423,6 +468,16 @@ async function createCompareWidget(node) {
 
 app.registerExtension({
     name: "NO8D.Control.ABPreview",
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name !== NODE_NAME) return;
+        const onResize = nodeType.prototype.onResize;
+        nodeType.prototype.onResize = function () {
+            onResize?.apply(this, arguments);
+            if (!this._no8dCompareEls) return;
+            renderCompare(this);
+            app.graph?.setDirtyCanvas?.(true, true);
+        };
+    },
     async nodeCreated(node) {
         if (!isTargetNode(node) || typeof node.addDOMWidget !== "function") return;
         await createCompareWidget(node);

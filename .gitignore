@@ -19,3 +19,6 @@ desktop.ini
 *.tmp
 *.bak
 
+config/
+prompt_*_preview.png
+

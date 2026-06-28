@@ -9,9 +9,12 @@ const STACK_BOTTOM_GAP = 16;
 
 const stackPassThroughStyle = document.createElement("style");
 stackPassThroughStyle.textContent = `
-    .dom-widget.no8d-stack-widget { pointer-events: none !important; }
+    .dom-widget.no8d-stack-fit-widget { pointer-events: none !important; box-sizing: border-box; overflow: hidden; }
     .no8d-stack-control { pointer-events: auto; }
     .no8d-stack-reordering .no8d-stack-row { pointer-events: auto; }
+    .no8d-stack-dragging .no8d-stack-row { transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease; }
+    .no8d-stack-drop-before { box-shadow: inset 0 3px 0 #60a5fa; background:#102b4f !important; }
+    .no8d-stack-drop-after { box-shadow: inset 0 -3px 0 #60a5fa; background:#102b4f !important; }
 `;
 document.head.appendChild(stackPassThroughStyle);
 
@@ -228,7 +231,7 @@ function ensureStackNodeFitsContent(node) {
     if (!node || typeof node.setSize !== "function") return;
     const computed = node.computeSize?.();
     if (!Array.isArray(computed)) return;
-    const width = Math.max(node.size?.[0] || computed[0], STACK_MIN_WIDTH);
+    const width = node.size?.[0] || computed[0];
     const height = Math.max(node.size?.[1] || computed[1], computed[1]);
     if (width === node.size?.[0] && height === node.size?.[1]) return;
     node.setSize([width, height]);
@@ -245,6 +248,13 @@ function render(node) {
     list.innerHTML = "";
     let options = getOptions(node);
     const entries = node._stackEntries || [];
+    let dropId = null;
+    let dropAfter = false;
+    const clearDropMarkers = () => {
+        for (const child of list.querySelectorAll(".no8d-stack-drop-before,.no8d-stack-drop-after")) {
+            child.classList.remove("no8d-stack-drop-before", "no8d-stack-drop-after");
+        }
+    };
     for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
         if (!entry.id) entry.id = `${Date.now()}_${i}_${Math.random().toString(16).slice(2)}`;
@@ -261,48 +271,51 @@ function render(node) {
         row.addEventListener("dragover", (e) => {
             if (!node._stackContainer?.classList.contains("no8d-stack-reordering")) return;
             e.preventDefault();
-            row.style.background = "#102b4f";
-            row.style.outline = "2px solid #3b82f6";
-            row.style.transform = "translateY(-1px)";
+            clearDropMarkers();
+            const rect = row.getBoundingClientRect();
+            dropId = entry.id;
+            dropAfter = e.clientY > rect.top + rect.height / 2;
+            row.classList.add(dropAfter ? "no8d-stack-drop-after" : "no8d-stack-drop-before");
         });
         row.addEventListener("dragleave", () => {
-            row.style.background = "";
-            row.style.outline = "";
-            row.style.transform = "";
+            row.classList.remove("no8d-stack-drop-before", "no8d-stack-drop-after");
         });
         row.addEventListener("drop", (e) => {
             if (!node._stackContainer?.classList.contains("no8d-stack-reordering")) return;
             e.preventDefault();
-            row.style.background = "";
-            row.style.outline = "";
-            row.style.transform = "";
-            node._stackContainer?.classList.remove("no8d-stack-reordering");
+            clearDropMarkers();
+            node._stackContainer?.classList.remove("no8d-stack-reordering", "no8d-stack-dragging");
             const fromId = e.dataTransfer.getData("text/plain");
             const from = entries.findIndex((x) => x.id === fromId);
-            const to = entries.findIndex((x) => x.id === entry.id);
-            if (from < 0 || to < 0 || from === to) return;
+            let to = entries.findIndex((x) => x.id === (dropId || entry.id));
+            if (from < 0 || to < 0) return;
             const [moved] = entries.splice(from, 1);
+            if (from < to) to -= 1;
+            if (dropAfter) to += 1;
+            if (from === to) return;
             entries.splice(to, 0, moved);
             writeStack(node);
             render(node);
         });
 
         const handle = document.createElement("div");
-        handle.innerHTML = "<span>••</span><span>••</span>";
         handle.title = t("dragReorder");
-        handle.style.cssText = "cursor:grab; color:#9aa; font-size:12px; line-height:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; user-select:none;";
+        handle.textContent = "⋮⋮";
+        handle.style.cssText = "cursor:grab; color:#9aa; font-size:18px; line-height:1; display:flex; align-items:center; justify-content:center; user-select:none;";
         handle.draggable = true;
         stopGraphEvents(handle);
         handle.addEventListener("dragstart", (e) => {
-            node._stackContainer?.classList.add("no8d-stack-reordering");
+            node._stackContainer?.classList.add("no8d-stack-reordering", "no8d-stack-dragging");
             e.dataTransfer.setData("text/plain", entry.id);
             e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.dropEffect = "move";
             row.style.opacity = "0.45";
             row.style.outline = "2px solid #60a5fa";
             row.style.background = "#102b4f";
         });
         handle.addEventListener("dragend", () => {
-            node._stackContainer?.classList.remove("no8d-stack-reordering");
+            node._stackContainer?.classList.remove("no8d-stack-reordering", "no8d-stack-dragging");
+            clearDropMarkers();
             row.style.opacity = "1";
             row.style.outline = "";
             row.style.background = "";
@@ -458,11 +471,15 @@ function render(node) {
 
         if (entry._editingRange) {
             const rangeRow = document.createElement("div");
-            rangeRow.style.cssText = "display:flex; align-items:center; gap:20px; padding:6px 8px 8px 68px; border-bottom:1px solid #1e3a8a; background:#111d32; min-width:740px;";
+            rangeRow.style.cssText = "display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:8px; border-bottom:1px solid #1e3a8a; background:#111d32; min-width:0;";
+            const rangeLeft = document.createElement("span");
+            rangeLeft.style.cssText = "display:inline-flex; align-items:center; gap:20px; justify-content:flex-start; min-width:0;";
+            const rangeRight = document.createElement("span");
+            rangeRight.style.cssText = "display:inline-flex; align-items:center; gap:10px; justify-content:flex-end; min-width:96px;";
             const minGroup = document.createElement("span");
-            minGroup.style.cssText = "display:inline-flex; align-items:center; gap:10px;";
+            minGroup.style.cssText = "display:inline-flex; align-items:center; gap:10px; min-width:0;";
             const maxGroup = document.createElement("span");
-            maxGroup.style.cssText = "display:inline-flex; align-items:center; gap:10px;";
+            maxGroup.style.cssText = "display:inline-flex; align-items:center; gap:10px; min-width:0;";
             const minLabel = document.createElement("span");
             minLabel.textContent = t("minValue");
             minLabel.style.cssText = "color:#bbb; font-size:12px; text-align:left;";
@@ -470,7 +487,7 @@ function render(node) {
             minInput.type = "number";
             minInput.step = "0.1";
             minInput.value = String(entry.min);
-            minInput.style.cssText = "height:26px; background:#111827; color:#dbeafe; border:1px solid #2563eb; border-radius:4px; padding:3px 6px;";
+            minInput.style.cssText = "height:26px; width:120px; min-width:0; background:#111827; color:#dbeafe; border:1px solid #2563eb; border-radius:4px; padding:3px 6px;";
             stopGraphEvents(minInput);
             minInput.addEventListener("focus", () => minInput.select());
             const maxLabel = document.createElement("span");
@@ -480,7 +497,7 @@ function render(node) {
             maxInput.type = "number";
             maxInput.step = "0.1";
             maxInput.value = String(entry.max);
-            maxInput.style.cssText = "height:26px; background:#111827; color:#dbeafe; border:1px solid #2563eb; border-radius:4px; padding:3px 6px;";
+            maxInput.style.cssText = "height:26px; width:120px; min-width:0; background:#111827; color:#dbeafe; border:1px solid #2563eb; border-radius:4px; padding:3px 6px;";
             stopGraphEvents(maxInput);
             maxInput.addEventListener("focus", () => maxInput.select());
             minGroup.append(minLabel, minInput);
@@ -496,8 +513,6 @@ function render(node) {
                 writeStack(node);
                 render(node);
             });
-            const spacer = document.createElement("span");
-            spacer.style.cssText = "flex:1 1 auto;";
             apply.style.width = "56px";
             const del = makeButton("🗑", t("deleteLora"), () => {
                 const idx = entries.findIndex((x) => x.id === entry.id);
@@ -506,7 +521,9 @@ function render(node) {
                 render(node);
             });
             del.style.width = "34px";
-            rangeRow.append(minGroup, maxGroup, spacer, apply, del);
+            rangeLeft.append(minGroup, maxGroup);
+            rangeRight.append(apply, del);
+            rangeRow.append(rangeLeft, rangeRight);
             list.appendChild(rangeRow);
         }
     }
@@ -520,14 +537,14 @@ function attach(node) {
     node._stackEntries = readStack(node);
 
     const container = document.createElement("div");
-    container.style.cssText = "width:100%; box-sizing:border-box; overflow:visible; pointer-events:none;";
+    container.style.cssText = "width:100%; max-width:100%; box-sizing:border-box; overflow:hidden; pointer-events:none;";
 
     const panel = document.createElement("div");
-    panel.style.cssText = "width:100%; box-sizing:border-box; background:#1f1f1f; border:1px solid #333; border-radius:6px; overflow:hidden; overscroll-behavior:contain; pointer-events:none;";
+    panel.style.cssText = "width:100%; max-width:100%; box-sizing:border-box; background:#1f1f1f; border:1px solid #333; border-radius:6px; overflow:hidden; overscroll-behavior:contain; pointer-events:none;";
     node._stackContainer = panel;
 
     const header = document.createElement("div");
-    header.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; background:#171717; border-bottom:1px solid #333;";
+    header.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; background:#171717; border-bottom:1px solid #333; box-sizing:border-box; max-width:100%;";
     const add = makeButton("+", t("addLora"), () => {
         node._stackEntries.push(defaultEntry(getOptions(node)));
         writeStack(node);
@@ -550,7 +567,7 @@ function attach(node) {
     panel.appendChild(header);
 
     const list = document.createElement("div");
-    list.style.cssText = "display:flex; flex-direction:column; min-height:72px; overflow:visible;";
+    list.style.cssText = "display:flex; flex-direction:column; min-height:72px; overflow-x:auto; overflow-y:visible;";
     panel.appendChild(list);
     node._stackList = list;
     container.appendChild(panel);
@@ -558,16 +575,25 @@ function attach(node) {
     const widget = node.addDOMWidget("slider_lora_stack", "stack", container, {
         serialize: false,
         hideOnZoom: false,
-        getMinWidth: () => STACK_MIN_WIDTH,
+        getMinWidth: () => 0,
         getMinHeight: () => stackWidgetHeight(node),
     });
     node._stackWidget = widget;
-    widget.minWidth = STACK_MIN_WIDTH;
+    widget.minWidth = 0;
     widget.computeSize = (width) => [
-        Math.max(width || 0, STACK_MIN_WIDTH),
+        Math.max(width || 1, 1),
         stackWidgetHeight(node),
     ];
-    const markWrapper = () => container.closest(".dom-widget")?.classList.add("no8d-stack-widget");
+    const markWrapper = () => {
+        const wrapper = container.closest(".dom-widget");
+        if (!wrapper) return;
+        wrapper.classList.remove("no8d-stack-widget");
+        wrapper.classList.add("no8d-stack-fit-widget");
+        if (wrapper.style.width === "100%") wrapper.style.width = "";
+        if (wrapper.style.maxWidth === "100%") wrapper.style.maxWidth = "";
+        wrapper.style.boxSizing = "border-box";
+        wrapper.style.overflow = "hidden";
+    };
     markWrapper();
     requestAnimationFrame(markWrapper);
     render(node);

@@ -4,7 +4,7 @@ import { isComfySpaceDown, passMouseToComfy } from "./no8d_comfy_events.js";
 import { t } from "./no8d_i18n.js";
 
 const NODE_NAME = "NO8DInpainting";
-const LITE_MIN_WIDTH = 920;
+const LITE_MIN_WIDTH = 700;
 const LITE_MIN_HEIGHT = 560;
 const LITE_HISTORY_LIMIT = 8;
 const BRUSH_SIZE_SCALE = 10;
@@ -590,8 +590,8 @@ function imagePoint(node, event) {
     const img = node._liteImg;
     if (!canvas || !img?.naturalWidth) return null;
     const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width * img.naturalWidth;
-    const y = (event.clientY - rect.top) / rect.height * img.naturalHeight;
+    const x = (event.clientX - rect.left) / Math.max(rect.width, 1) * img.naturalWidth;
+    const y = (event.clientY - rect.top) / Math.max(rect.height, 1) * img.naturalHeight;
     return { x, y };
 }
 
@@ -841,9 +841,6 @@ function activateLiteNode(node) {
         hideNativeWidgets(node);
         attach(node);
         hideNativeWidgets(node);
-        if (node.size?.[0] < LITE_MIN_WIDTH && typeof node.setSize === "function") {
-            node.setSize([LITE_MIN_WIDTH, node.size?.[1] || LITE_MIN_HEIGHT]);
-        }
         syncControls(node);
         draw(node);
         return true;
@@ -876,7 +873,8 @@ function attach(node) {
     node._liteScheduler = select(t("scheduler"), schedOptions, (v) => setWidget(findWidget(node, "scheduler"), v));
     node._liteDenoise = number(t("denoise"), { min: 0, max: 1, step: 0.05, width: 76 }, (v) => setWidget(findWidget(node, "denoise"), v));
     sampler.style.display = "grid";
-    sampler.style.gridTemplateColumns = "320px 320px";
+    sampler.style.gridTemplateColumns = "repeat(2, minmax(160px, 1fr))";
+    sampler.style.minWidth = "0";
     const samplerGroup = controlGroup(node._liteSampler);
     const schedulerGroup = controlGroup(node._liteScheduler);
     for (const [group, control] of [[samplerGroup, node._liteSampler], [schedulerGroup, node._liteScheduler]]) {
@@ -913,15 +911,25 @@ function attach(node) {
         }
     });
     syncLiteSeedControls(node);
-    seedRow.style.display = "grid";
-    seedRow.style.gridTemplateColumns = "120px 120px 0px 320px 20px";
+    seedRow.style.display = "flex";
+    seedRow.style.flexWrap = "nowrap";
+    seedRow.style.justifyContent = "space-between";
+    seedRow.style.minWidth = "0";
     const stepsGroup = controlGroup(node._liteSteps);
     const cfgGroup = controlGroup(node._liteCfg);
-    const seedGap = document.createElement("span");
     const seedGroup = controlGroup(node._liteSeed);
     const seedLockGroup = controlGroup(node._liteSeedLock);
-    seedLockGroup.style.justifySelf = "end";
-    seedRow.append(stepsGroup, cfgGroup, seedGap, seedGroup, seedLockGroup);
+    const seedLeft = document.createElement("span");
+    seedLeft.style.cssText = "display:inline-flex; align-items:center; gap:20px; min-width:0; flex:0 0 auto;";
+    const seedRight = document.createElement("span");
+    seedRight.style.cssText = "display:inline-flex; align-items:center; gap:10px; justify-content:flex-end; min-width:0; flex:1 1 auto;";
+    seedGroup.style.minWidth = "0";
+    seedGroup.style.flex = "0 1 auto";
+    node._liteSeed.style.minWidth = "0";
+    node._liteSeed.style.flex = "0 1 auto";
+    seedLeft.append(stepsGroup, cfgGroup);
+    seedRight.append(seedGroup, seedLockGroup);
+    seedRow.append(seedLeft, seedRight);
     panel.appendChild(seedRow);
 
     const setMaskTool = (tool, shape = null) => {
@@ -954,6 +962,9 @@ function attach(node) {
     const maskRow = row();
     maskRow.style.flexWrap = "nowrap";
     maskRow.style.alignItems = "center";
+    maskRow.style.justifyContent = "space-between";
+    maskRow.style.overflowX = "auto";
+    maskRow.style.overflowY = "hidden";
     node._liteMaskRow = maskRow;
     node._liteBrushGroup = document.createElement("span");
     node._liteBrushGroup.style.cssText = "display:inline-flex; align-items:center; gap:10px; height:32px; white-space:nowrap; flex:0 0 auto;";
@@ -988,12 +999,17 @@ function attach(node) {
         controlGroup(node._liteFeather),
         controlGroup(node._liteColor),
     ];
-    maskRow.append(
-        controlGroup(node._liteToolGroup),
+    const maskLeft = document.createElement("span");
+    maskLeft.style.cssText = "display:inline-flex; align-items:center; gap:10px; min-width:0; flex:0 0 auto;";
+    const maskRight = document.createElement("span");
+    maskRight.style.cssText = "display:inline-flex; align-items:center; gap:20px; justify-content:flex-end; min-width:0; flex:1 1 auto;";
+    maskLeft.append(controlGroup(node._liteToolGroup));
+    maskRight.append(
         controlGroup(node._liteBrushGroup),
         ...node._liteCommonMaskControls,
         controlGroup(node._liteDenoise),
     );
+    maskRow.append(maskLeft, maskRight);
     panel.appendChild(maskRow);
 
     const wrap = document.createElement("div");

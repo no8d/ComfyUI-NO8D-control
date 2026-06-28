@@ -2,23 +2,25 @@
 
 [English](./README.md) | 简体中文
 
-ComfyUI-NO8D-control 是一套面向 ComfyUI 的 LoRA 控制、局部重绘和 A/B 图片对比节点组。
+ComfyUI-NO8D-control 是一套 ComfyUI 自定义节点，用于 LoRA 控制、局部重绘、A/B 图像对比，以及通过 OpenAI-compatible API 进行提示词扩写和图像反推。
 
-它适用于普通 LoRA 和 Slider LoRA 工作流，目标是让用户更直观地观察 LoRA、权重、遮罩、seed 和局部编辑参数对同一张图像的影响。
+它面向实际出图迭代：在同一个 ComfyUI 工作流里调整 LoRA 权重、绘制局部遮罩、比较不同结果，并准备正向提示词。
 
-![ComfyUI-NO8D-control 工作流总览](docs/images/workflow-overview.svg)
+![ComfyUI-NO8D-control 工作流概览](docs/images/workflow-overview.svg)
 
-节点组包含三个节点：
+所有节点都位于 `NO8D-control` 分类下。
+
+## 节点
 
 - `NO8D-LoRA stack`
 - `NO8D-Inpainting`
 - `NO8D-A/B preview`
-
-三个节点位于 ComfyUI 的 `NO8D-control` 分类中。
+- `NO8D-Prompt-plus`
+- `NO8D-Prompt-view`
 
 ## 安装
 
-进入 ComfyUI 的 `custom_nodes` 目录：
+将仓库克隆到 ComfyUI 的 `custom_nodes` 目录：
 
 ```bash
 cd ComfyUI/custom_nodes
@@ -27,158 +29,169 @@ git clone https://github.com/NO8D/ComfyUI-NO8D-control.git
 
 安装后重启 ComfyUI，并强制刷新浏览器页面。
 
-本节点组使用 ComfyUI 已有的 Python 与前端环境，不需要单独构建前端。
+本节点组使用 ComfyUI 已有的 Python 和前端扩展环境，不需要额外构建前端。
 
 ## 基本工作流
 
 ```text
-Checkpoint Loader: MODEL
-          │
-          ▼
-NO8D-LoRA stack
-          │ MODEL
-          ▼
-NO8D-Inpainting ── IMAGE ──► NO8D-A/B preview
+Checkpoint Loader
+    MODEL -> NO8D-LoRA stack -> MODEL -> NO8D-Inpainting -> IMAGE -> NO8D-A/B preview
 ```
 
-同时将工作流中的 `positive`、`negative`、`VAE` 和 `LATENT` 连接到 `NO8D-Inpainting`。
+将 `positive`、`negative`、`vae` 和 `latent` 连接到 `NO8D-Inpainting`。如果不需要 LoRA 控制，也可以把原始模型直接连接到 `NO8D-Inpainting`。
 
-不需要 LoRA 时，可以直接把原始 `MODEL` 连接到 `NO8D-Inpainting`。
+提示词工作流：
 
-## 节点介绍
+```text
+文本或图像 -> NO8D-Prompt-plus -> NO8D-Prompt-view -> 正向提示词输入
+```
 
-### NO8D-LoRA stack
+## NO8D-LoRA Stack
 
-`NO8D-LoRA stack` 只负责 LoRA 加载和 LoRA 权重控制。
+`NO8D-LoRA stack` 负责 LoRA 加载和 LoRA 权重控制，不需要 CLIP 输入。
 
 ![NO8D-LoRA stack 示意图](docs/images/stack-node.svg)
 
 功能：
 
-- 添加多个 LoRA。
+- 在一个节点里添加多个 LoRA。
 - 按列表顺序应用 LoRA。
-- 通过滑条或数字框调节权重。
-- 为每个 LoRA 设置自定义最小值和最大值。
+- 通过滑条或数字框调整每个 LoRA 权重。
+- 为每个 LoRA 滑条设置自定义最小值和最大值。
 - 临时启用或关闭单个 LoRA。
 - 一键反选所有 LoRA 的启用状态。
-- 拖动排序手柄调整应用顺序。
-- LoRA 设置区采用手风琴结构，同一时间最多展开一个。
+- 通过拖拽手柄调整 LoRA 顺序。
+- 同一时间只展开一个 LoRA 设置面板。
 
-禁用、选择 `None` 或权重为 `0` 的条目不会加载。已加载的 LoRA 文件会在当前节点实例中缓存；从列表移除后，对应缓存也会释放。
+禁用项、`None` 和权重为 `0` 的条目会被跳过。已加载的 LoRA 文件会在当前节点实例中缓存，从列表移除后会释放对应缓存。
 
-本节点同时支持普通 LoRA 和 Slider LoRA。NO8D 训练并发布了大量 Slider LoRA，可以在这里获取：
+本节点支持普通 LoRA 和 Slider LoRA。NO8D 发布的 Slider LoRA 可以在这里获取：
 
 [huggingface.co/NO8D](https://huggingface.co/NO8D)
 
-这些 Slider LoRA 很适合配合 `NO8D-LoRA stack` 快速探索权重变化。
+## NO8D-Inpainting
 
-### NO8D-Inpainting
+`NO8D-Inpainting` 集成了 KSampler 风格采样、图像预览、遮罩绘制和有限的局部编辑历史。
 
-`NO8D-Inpainting` 负责采样、图像预览、遮罩绘制和连续局部编辑。
-
-它本身不加载 LoRA。LoRA 变化应来自上游的 `NO8D-LoRA stack` 或其它 ComfyUI 模型节点。
+它本身不加载 LoRA。LoRA 变化应来自上游的 `NO8D-LoRA stack` 或其他模型节点。
 
 ![NO8D-Inpainting 示意图](docs/images/inpainting-node.svg)
 
-采样控制：
+控制项：
 
-- Sampler 与 Scheduler
-- Steps
-- CFG
-- Seed 锁定/随机
-- Denoise
+- 采样器和调度器
+- Steps 和 CFG
+- 随机种子锁定或随机
+- 画笔和套索遮罩工具
+- 画笔大小、羽化、遮罩颜色和降噪强度
+- 反转遮罩和清除遮罩
+- 会话历史缩略图
 
-遮罩工具：
+清除遮罩表示接受当前编辑结果，并把它作为下一次局部编辑的底图。在清除遮罩之前，修改 LoRA 权重或采样参数会基于同一张底图重新计算当前遮罩区域。
 
-- 画笔
-- 套索
-- 画笔大小
-- 羽化大小
-- 遮罩颜色
-- 降噪强度
-- 反转遮罩
-- 清除遮罩
+历史记录只保存在当前会话中，并使用 ComfyUI 的预览引用，不会向本仓库写入永久图像。
 
-默认值：
+## NO8D-A/B Preview
 
-| 项目 | 默认值 |
-|---|---:|
-| 画笔显示尺寸 | `10` |
-| 羽化 | `30` |
-| 遮罩颜色 | `#66ccff` |
-| 未激活遮罩时 Denoise | `1.0` |
-| 激活遮罩后 Denoise | `0.75` |
-
-锁定 seed 只表示随机源保持不变。输入图像、LoRA、遮罩或采样参数发生变化时，ComfyUI 仍需要重新采样；所有相关内容不变时，节点会复用当前编辑结果，避免无意义的重复 GPU 运算。
-
-连续编辑逻辑：
-
-```text
-A
-└─ 眼睛遮罩 + 眼睛 LoRA → B
-   └─ 清除遮罩，接受 B
-      └─ 耳朵遮罩 + 耳朵 LoRA → C
-```
-
-“清除遮罩”表示接受当前结果，并把它作为下一轮编辑的底图。因此 C 会在 B 的基础上修改耳朵，而不是回到原始 A。
-
-在清除遮罩之前，更改 LoRA 权重会始终基于同一个 base 重新计算当前遮罩区域，不会把权重 `2` 隐式叠加在权重 `1` 的结果上。
-
-历史图最多显示 8 张，并使用 ComfyUI 的预览引用，不会在节点目录中保存永久图片。
-
-### NO8D-A/B preview
-
-`NO8D-A/B preview` 用于快速比较当前图像与上一张或选中的历史图像。
+`NO8D-A/B preview` 用于比较当前图像与上一张图像，或与选中的会话历史图像进行对比。
 
 ![NO8D-A/B preview 示意图](docs/images/ab-preview-node.svg)
 
 功能：
 
-- 拖动中间分割线查看差异。
-- 交换 A/B 两侧图像。
-- 保留最多 8 张当前会话历史图。
-- 历史图居中排列。
-- 使用 ComfyUI 临时预览图片，不自动写入永久输出目录。
+- 拖动分割线对比两张图像。
+- 交换 A/B 两侧。
+- 保留最多 8 张会话历史图像。
+- 在当前浏览器会话内恢复最近历史。
+- 使用 ComfyUI 临时预览图像，不自动写入永久文件。
+
+## NO8D-Prompt-Plus
+
+`NO8D-Prompt-plus` 使用已配置的 OpenAI-compatible API 生成正向提示词。
+
+输入：
+
+- `text`：可选文本输入，用于提示词扩写。
+- `image`：可选图像输入，用于图像反推。
+- `prompt_rules`：选择撰写规则。
+- `seed`：控制生成提示词的变化。
+- `extra_rules`：当前节点的附加规则。
+
+节点内部不再提供用户提示词文本框。请使用 `NO8D-Prompt-view`、其他文本节点，或任何兼容的文本输出作为 `text` 输入。
+
+内置规则类型：
+
+- `自然语言`：输出一段流畅的现代英文正向提示词。
+- `json结构`：输出可读的结构化英文 JSON。
+
+如果同时连接文本和图像，图像会作为视觉依据，文本会作为用户意图、修正或强调。
+
+图像反推时，节点会先压缩输入图像再发送到 API，以减少请求体积和等待时间。
+
+## NO8D-Prompt-View
+
+`NO8D-Prompt-view` 用于显示并可选编辑提示词文本。
+
+- `自动输出` 开启：自动显示并传递收到的文本。
+- `自动输出` 关闭：阻断后续节点执行，直到点击 `发送`。
+- `发送`：只运行下游节点并输出当前编辑后的文本，不重新运行上游扩写节点。
+
+这个节点也可以作为简单的手动文本输入节点使用。
+
+## 提示词 API 设置
+
+提示词 API 设置位于 ComfyUI 设置面板中，不需要在每个节点里重复填写。
+
+打开 ComfyUI 设置，找到 `NO8D-control / Prompt`。
+
+可用设置：
+
+- 规则管理器：编辑内置提示词撰写规则，或新增自定义规则。
+- 默认提示词 API：选择默认服务。
+- API 管理器：添加、编辑、删除、验证并选择 OpenAI-compatible API 服务。
+- 模型列表：验证 API 后，从可搜索的模型列表中选择一个模型。
+
+配置文件保存在 ComfyUI 用户目录：
+
+```text
+default/no8d-control/config/prompt_api.json
+```
+
+这是本地用户配置，不应提交到仓库。
 
 ## 与 ComfyUI 的交互边界
 
-本节点组尽量让自定义行为保持在最小范围内，把 ComfyUI 已有能力交还给 ComfyUI。
+本扩展尽量让自定义前端行为保持在必要范围内，并优先使用 ComfyUI 自身行为。
 
 - 不覆盖 ComfyUI 的全局队列或画布方法。
-- 空格拖动画布、滚轮、右键菜单和全局快捷键尽量交还 ComfyUI。
-- `NO8D-Inpainting` 只有在遮罩工具激活，且用户在预览窗口绘制遮罩时才接管鼠标输入。
-- `NO8D-LoRA stack` 只在按钮、滑条、输入框和排序手柄等真实控件上接管交互。
+- 画布拖拽、滚轮、右键菜单和全局快捷键会尽量交还给 ComfyUI。
+- `NO8D-Inpainting` 只在遮罩工具激活并绘制遮罩时接管指针输入。
+- `NO8D-LoRA stack` 只在按钮、滑条、输入框和拖拽手柄等真实控件上接管交互。
 - 输入框聚焦时，`Ctrl/Cmd + Enter` 仍可触发 ComfyUI 运行。
 
 ## 注意事项
 
-- LoRA 权重对模型差值的调节是线性的，但扩散采样和最终视觉变化不保证线性。
-- 当前编辑状态保存在运行中的节点实例内，重启 ComfyUI 后不会保留内存中的 base/edited 历史。
-- `NO8D-A/B preview` 只保留当前会话中的临时历史图。
-- 后端节点 ID 已保持稳定，避免影响已有工作流。
-
-## 截图
-
-当前 README 使用保存在 `docs/images/` 中的轻量 SVG 示意图。之后如果需要替换成真实 ComfyUI 截图，也可以把图片放在同一目录，并用标准 Markdown 图片语法引用。
+- LoRA 权重对模型差值的调整是线性的，但最终视觉变化不保证线性。
+- 运行时编辑状态保存在当前节点实例中。重启 ComfyUI 会清除内存中的编辑历史。
+- `NO8D-A/B preview` 只保留当前会话中的临时历史。
+- 后端节点 ID 保持稳定，以避免破坏已有工作流。
 
 ## 反馈
 
-NO8D 并不是专业的软件开发者。本节点组是在 Codex 的帮助下，通过实际使用、反复调试和多轮 ComfyUI 实机测试逐步完成的。
+NO8D 不是专业软件开发者。本节点组是在 Codex 的帮助下，通过实际测试、反复调试和真实 ComfyUI 工作流中的多轮迭代完成的。
 
-如果你在使用中遇到 bug、行为不清晰、兼容问题，或者任何觉得不对劲的地方，欢迎告诉 NO8D。能够复现的问题描述、截图或工作流会非常有帮助。
+欢迎通过 [GitHub Issues](https://github.com/NO8D/ComfyUI-NO8D-control/issues) 提交可复现的问题和功能建议。参与代码贡献前，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
-欢迎通过 [GitHub Issues](https://github.com/NO8D/ComfyUI-NO8D-control/issues) 提交可复现的问题和功能建议。参与代码贡献前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+你也可以通过 [NO8D Patreon 社区](https://patreon.com/no8d?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink) 支持 NO8D，并交流 LoRA 控制、Slider LoRA 和局部重绘工作流。
 
 ## 鸣谢
 
-感谢 [ComfyUI](https://github.com/comfyanonymous/ComfyUI) 及其社区提供的节点系统、采样、预览和扩展机制。本节点组建立在这些原生能力之上。
+感谢 [ComfyUI](https://github.com/comfyanonymous/ComfyUI) 及其社区提供节点系统、采样工具、预览流程和扩展机制。
 
-`NO8D-Inpainting` 的早期构思和开发受到 [shootthesound/ComfyUI-Angelo](https://github.com/shootthesound/ComfyUI-Angelo) 的启发，感谢原作者带来的思路与参考。
+`NO8D-Inpainting` 的早期想法和方向受到 [shootthesound/ComfyUI-Angelo](https://github.com/shootthesound/ComfyUI-Angelo) 启发，感谢原作者提供的思路。
 
-感谢 Patreon 社区成员 **Wylmquest** 在开发过程中提出建议，帮助节点组持续改进。
+感谢 Patreon 社区成员 **Wylmquest** 在开发过程中提出建议。
 
-欢迎加入 [NO8D 的 Patreon 社区](https://patreon.com/no8d?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink)，支持开发、反馈问题、提出建议，或交流 LoRA 控制和局部重绘工作流。
+## 许可
 
-## 许可证
-
-本项目采用 [MIT License](./LICENSE)。
+本项目使用 [MIT License](./LICENSE)。
