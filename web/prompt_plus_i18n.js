@@ -10,11 +10,13 @@ const WIDGET_LABELS = {
     prompt_rules: "promptRules",
     seed: "promptSeed",
     extra_rules: "promptExtraRules",
+    style_preset: "promptStylePreset",
     text: "promptTextInput",
     auto_output: "promptViewAuto",
     edited_text: "promptEditedText",
     send_seq: "promptSendSeq",
 };
+const PROMPT_PLUS_WIDGET_ORDER = ["prompt_rules", "style_preset", "extra_rules", "seed"];
 
 function nodeClass(node) {
     return node?.comfyClass || node?.type || "";
@@ -37,10 +39,26 @@ function removeStalePromptPlusWidgets(node) {
     }
 }
 
+function orderPromptPlusWidgets(node) {
+    if (nodeClass(node) !== PROMPT_PLUS || !Array.isArray(node.widgets)) return;
+    const rank = new Map(PROMPT_PLUS_WIDGET_ORDER.map((name, index) => [name, index]));
+    const widgetRank = (widget) => {
+        if (typeof widget.name === "string" && /control_after_generate/i.test(widget.name)) return 999;
+        return rank.has(widget.name) ? rank.get(widget.name) : PROMPT_PLUS_WIDGET_ORDER.length;
+    };
+    node.widgets.sort((a, b) => {
+        const ai = widgetRank(a);
+        const bi = widgetRank(b);
+        if (ai !== bi) return ai - bi;
+        return 0;
+    });
+}
+
 function applyWidgetLabels(node) {
     const cls = nodeClass(node);
     if (cls !== PROMPT_PLUS && cls !== PROMPT_VIEW) return;
     removeStalePromptPlusWidgets(node);
+    orderPromptPlusWidgets(node);
     if (cls === PROMPT_PLUS) node.title = t("promptPlusTitle");
     if (cls === PROMPT_VIEW) node.title = t("promptViewTitle");
     for (const widget of node.widgets || []) {

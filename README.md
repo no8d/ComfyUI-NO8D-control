@@ -119,6 +119,7 @@ Inputs:
 - `prompt_rules`: choose a writing rule.
 - `seed`: controls variation in the generated prompt.
 - `extra_rules`: optional per-node instructions.
+- `style_preset`: choose the requested prompt style. Available presets are amateur photography, professional photography, cinematic photography, Japanese anime, American animation, illustration art, oil painting, photorealistic 3D, and stylized 3D cartoon.
 
 There is no built-in user prompt text box. Use `NO8D-Prompt-view`, another text node, or any compatible text output as the text input.
 

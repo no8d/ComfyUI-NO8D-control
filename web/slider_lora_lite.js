@@ -4,7 +4,7 @@ import { isComfySpaceDown, passMouseToComfy } from "./no8d_comfy_events.js";
 import { t } from "./no8d_i18n.js";
 
 const NODE_NAME = "NO8DInpainting";
-const LITE_MIN_WIDTH = 700;
+const LITE_MIN_WIDTH = 600;
 const LITE_MIN_HEIGHT = 560;
 const LITE_HISTORY_LIMIT = 8;
 const BRUSH_SIZE_SCALE = 10;
@@ -340,8 +340,6 @@ function hideNativeWidgets(node) {
         w.computeSize = () => [0, -4];
         w.draw = () => {};
     }
-    node.graph?.setDirtyCanvas?.(true, true);
-    app?.canvas?.setDirty?.(true, true);
 }
 
 function syncInput(wrap, value) {
@@ -858,9 +856,9 @@ function attach(node) {
 
     const container = document.createElement("div");
     container.classList.add("no8d-lite-root");
-    container.style.cssText = "width:100%; height:100%; position:relative; box-sizing:border-box; overflow:hidden; pointer-events:none;";
+    container.style.cssText = "width:100%; max-width:100%; height:100%; box-sizing:border-box; overflow:hidden; pointer-events:none;";
     const panel = document.createElement("div");
-    panel.style.cssText = "position:absolute; inset:0; display:flex; flex-direction:column; background:#202020; border:1px solid #333; border-radius:4px; overflow:hidden; box-sizing:border-box; pointer-events:none;";
+    panel.style.cssText = "width:100%; max-width:100%; height:100%; display:flex; flex-direction:column; background:#202020; border:1px solid #333; border-radius:4px; overflow:hidden; box-sizing:border-box; pointer-events:none;";
     container.appendChild(panel);
     node._liteContainer = container;
     node._litePanel = panel;
@@ -1157,11 +1155,14 @@ function attach(node) {
     const widget = node.addDOMWidget("no8d_inpainting_canvas", "inpainting_canvas", container, {
         serialize: false,
         hideOnZoom: false,
-        getMinHeight: () => LITE_MIN_HEIGHT,
-        margin: 10,
-        afterResize: () => scheduleDraw(node),
     });
     node._liteWidget = widget;
+    widget.computeLayoutSize = () => ({
+        minWidth: LITE_MIN_WIDTH,
+        minHeight: LITE_MIN_HEIGHT,
+        maxWidth: 1_000_000,
+        maxHeight: 1_000_000,
+    });
     const markWrapper = () => container.closest(".dom-widget")?.classList.add("no8d-lite-widget");
     markWrapper();
     requestAnimationFrame(markWrapper);
@@ -1193,12 +1194,6 @@ app.registerExtension({
             activateLiteNode(this);
             setTimeout(() => activateLiteNode(this), 0);
             setTimeout(() => activateLiteNode(this), 250);
-            if (typeof this.setSize === "function") {
-                this.setSize([
-                    Math.max(this.size?.[0] || 0, LITE_MIN_WIDTH),
-                    Math.max(this.size?.[1] || 0, LITE_MIN_HEIGHT),
-                ]);
-            }
         };
         const onAdded = nodeType.prototype.onAdded;
         nodeType.prototype.onAdded = function () {
@@ -1222,7 +1217,6 @@ app.registerExtension({
         const onResize = nodeType.prototype.onResize;
         nodeType.prototype.onResize = function () {
             if (onResize) onResize.apply(this, arguments);
-            if (this.size && this.size[0] < LITE_MIN_WIDTH) this.size[0] = LITE_MIN_WIDTH;
             scheduleDraw(this);
         };
         const onExecuted = nodeType.prototype.onExecuted;

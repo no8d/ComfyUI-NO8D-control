@@ -26,6 +26,28 @@ from .prompt_config import prompt_config_manager
 _API_MAX_TOKENS = 700
 _IMAGE_MAX_EDGE = 1024
 _IMAGE_JPEG_QUALITY = 85
+_STYLE_PRESETS = (
+    "业余摄影",
+    "专业摄影",
+    "影视摄影",
+    "日式动漫",
+    "美式动漫",
+    "插画艺术",
+    "油画艺术",
+    "3d写实",
+    "3d卡通",
+)
+_STYLE_PRESET_RULES = {
+    "业余摄影": "Use a clearly amateur smartphone-photography look. Preserve the visible subject, clothing, styling, and setting, but describe the capture quality as rough and phone-made rather than polished. The final output must include common modern English cues such as phone photo, casual snapshot, handheld framing, available light, spontaneous moment, everyday setting, natural colors, uneven exposure, slight motion blur, phone-camera noise, limited dynamic range, compressed detail, imperfect focus, and believable everyday flaws when appropriate. Make it feel like a real mobile-phone capture or casual social-media photo, not a DSLR shoot, studio setup, commercial advertisement, or polished cinematic still.",
+    "专业摄影": "Use a professional photography look: DSLR or mirrorless camera quality, refined commercial/editorial composition, controlled lighting, crisp lens rendering, polished color grading, and high-end advertising or fashion-shoot detail.",
+    "影视摄影": "Use a cinematic film-still look: dramatic motivated lighting, film grain, expressive shadows, carefully staged blocking, atmospheric depth, lens character, and movie-like color grading.",
+    "日式动漫": "Use a Japanese anime look: clean line art, expressive anime character design, cel shading, detailed background art, controlled color harmonies, and a polished key-visual or animation-still feeling.",
+    "美式动漫": "Use an American animation or comic-inspired look: bold readable shapes, expressive poses, confident outlines, lively character acting, clear staging, saturated but balanced colors, and dynamic graphic energy.",
+    "插画艺术": "Use an illustration-art look: deliberate stylized drawing, cohesive design language, expressive shapes, thoughtful composition, rich surface detail, and a polished editorial or concept-art finish.",
+    "油画艺术": "Use an oil-painting look: visible brushwork, layered paint texture, canvas-like surface, painterly edges, rich pigments, classical light handling, and tactile material depth.",
+    "3d写实": "Use a photorealistic 3D look: physically based materials, realistic geometry, ray-traced lighting, accurate reflections, natural camera perspective, and high-detail render quality.",
+    "3d卡通": "Use a stylized 3D cartoon look: rounded forms, appealing simplified shapes, expressive animation-style characters, clean materials, bright controlled colors, and playful cinematic lighting.",
+}
 
 def _endpoint_from_base_url(base_url):
     url = str(base_url or "").strip().strip('"').strip("'")
@@ -256,11 +278,21 @@ Write all descriptive JSON string values in fluent, common, modern English.
 """.strip()
 
 
-def _build_messages(prompt_input, rule, extra_rules, seed, image_data_url=""):
+def _style_preset_rule(style_preset):
+    preset = str(style_preset or "").strip()
+    return _STYLE_PRESET_RULES.get(preset, _STYLE_PRESET_RULES[_STYLE_PRESETS[1]])
+
+
+def _build_messages(prompt_input, rule, extra_rules, seed, image_data_url="", style_preset="专业摄影"):
     system = (
         _json_system_prompt(rule)
         if prompt_config_manager.prompt_rule_mode(rule) == "json"
         else _natural_system_prompt(rule)
+    )
+    system += (
+        "\n\nStyle preset:\n"
+        f"{_style_preset_rule(style_preset)}\n"
+        "Apply this style preset clearly in the final output. If an input image is provided, reverse-engineer the image content while rewriting the caption in this selected style. Preserve the user's subject and visible facts unless the user explicitly asks for a style transformation."
     )
     if extra_rules and str(extra_rules).strip():
         system += "\n\nAdditional user rules:\n" + str(extra_rules).strip()
@@ -376,6 +408,7 @@ class NO8DPromptPlus:
         return {
             "required": {
                 "prompt_rules": (prompt_config_manager.prompt_rule_names(), {"default": _RULE_NATURAL}),
+                "style_preset": (_STYLE_PRESETS, {"default": "专业摄影"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True}),
                 "extra_rules": ("STRING", {"default": "", "multiline": True}),
             },
@@ -394,7 +427,7 @@ class NO8DPromptPlus:
     CATEGORY = "NO8D-control"
 
     @classmethod
-    def IS_CHANGED(cls, prompt_rules, seed=0, extra_rules="", text=None, image=None, unique_id=None):
+    def IS_CHANGED(cls, prompt_rules, style_preset="专业摄影", seed=0, extra_rules="", text=None, image=None, unique_id=None):
         service, model_cfg = prompt_config_manager.current_service()
         effective_seed = _safe_int(seed, 0)
         image_data_url, image_hash = _image_to_data_url(image)
@@ -403,6 +436,8 @@ class NO8DPromptPlus:
             "prompt": prompt,
             "prompt_rules": prompt_rules,
             "prompt_rule_text": prompt_config_manager.prompt_rule_text(prompt_rules),
+            "style_preset": style_preset,
+            "style_preset_rule": _style_preset_rule(style_preset),
             "service_id": service.get("id"),
             "api_base_url": service.get("base_url", ""),
             "model": model_cfg.get("name", ""),
@@ -414,7 +449,7 @@ class NO8DPromptPlus:
         }
         return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
-    def run(self, prompt_rules, seed=0, extra_rules="", text=None, image=None, unique_id=None):
+    def run(self, prompt_rules, style_preset="专业摄影", seed=0, extra_rules="", text=None, image=None, unique_id=None):
         node_key = str(unique_id or "default")
         prompt = str(text or "").strip()
         image_data_url, image_hash = _image_to_data_url(image)
@@ -429,7 +464,7 @@ class NO8DPromptPlus:
         prompt_rule = prompt_rules if prompt_rules in prompt_config_manager.prompt_rule_names() else _RULE_NATURAL
         max_tokens = _max_tokens_for_rule(prompt_rule, model_cfg.get("max_tokens", _API_MAX_TOKENS))
         effective_seed = _safe_int(seed, 0)
-        messages = _build_messages(prompt, prompt_rule, extra_rules, effective_seed, image_data_url)
+        messages = _build_messages(prompt, prompt_rule, extra_rules, effective_seed, image_data_url, style_preset)
         cache_payload = {
             "messages": _message_cache_text(messages),
             "service_id": service.get("id"),

@@ -5,10 +5,17 @@ const MIN_WIDTH = 260;
 const MIN_HEIGHT = 320;
 const HISTORY_LIMIT = 8;
 const HISTORY_STORAGE_KEY = "NO8D_AB_PREVIEW_HISTORY";
+const NODE_SIDE_GUTTER = 28;
 
 function widgetHeightForNode(node) {
     const nodeHeight = Number(node?.size?.[1] || 0);
     return Math.max(nodeHeight - 70, MIN_HEIGHT);
+}
+
+function widgetWidthForNode(node, fallbackWidth = 0) {
+    const nodeWidth = Number(node?.size?.[0] || 0);
+    const innerWidth = nodeWidth > 0 ? nodeWidth - NODE_SIDE_GUTTER : 0;
+    return Math.max(Math.floor(innerWidth), Math.floor(fallbackWidth || 0), MIN_WIDTH);
 }
 
 const passThroughStyle = document.createElement("style");
@@ -141,6 +148,7 @@ function setImage(img, ref) {
 function renderCompare(node) {
     const els = node._no8dCompareEls;
     if (!els) return;
+    syncCompareFrame(node);
 
     const left = node._no8dLeftRef || node._no8dCurrentRef;
     const right = node._no8dRightRef || node._no8dSelectedRef || left;
@@ -154,6 +162,27 @@ function renderCompare(node) {
     els.swapButton.title = "Swap visible images";
     els.afterClip.style.clipPath = `inset(0 ${100 - node._no8dSplit}% 0 0)`;
     els.handle.style.left = `${node._no8dSplit}%`;
+}
+
+function syncCompareFrame(node) {
+    const els = node._no8dCompareEls;
+    if (!els) return;
+
+    const width = widgetWidthForNode(node);
+    const height = widgetHeightForNode(node);
+    const wrapper = els.root.closest(".dom-widget");
+    if (wrapper) {
+        wrapper.classList.remove("no8d-compare-widget");
+        wrapper.classList.add("no8d-compare-fit-widget");
+        wrapper.style.width = `${width}px`;
+        wrapper.style.maxWidth = `${width}px`;
+        wrapper.style.height = `${height}px`;
+        wrapper.style.boxSizing = "border-box";
+        wrapper.style.overflow = "hidden";
+    }
+    els.root.style.width = `${width}px`;
+    els.root.style.maxWidth = `${width}px`;
+    els.root.style.height = `${height}px`;
 }
 
 function renderHistory(node) {
@@ -438,19 +467,13 @@ async function createCompareWidget(node) {
         afterResize: () => renderCompare(node),
     });
     widget.serialize = false;
-    widget.computeSize = (width) => [Math.max(width || MIN_WIDTH, MIN_WIDTH), widgetHeightForNode(node)];
+    node._no8dCompareWidget = widget;
+    widget.computeSize = (width) => [widgetWidthForNode(node, width), widgetHeightForNode(node)];
     if (typeof node.setSize === "function" && (!node.size || node.size[0] < MIN_WIDTH || node.size[1] < MIN_HEIGHT + 40)) {
         node.setSize([Math.max(node.size?.[0] || 0, MIN_WIDTH), Math.max(node.size?.[1] || 0, MIN_HEIGHT + 70)]);
     }
     const markWrapper = () => {
-        const wrapper = root.closest(".dom-widget");
-        if (!wrapper) return;
-        wrapper.classList.remove("no8d-compare-widget");
-        wrapper.classList.add("no8d-compare-fit-widget");
-        if (wrapper.style.width === "100%") wrapper.style.width = "";
-        if (wrapper.style.maxWidth === "100%") wrapper.style.maxWidth = "";
-        wrapper.style.boxSizing = "border-box";
-        wrapper.style.overflow = "hidden";
+        syncCompareFrame(node);
     };
     markWrapper();
     requestAnimationFrame(markWrapper);
@@ -474,6 +497,7 @@ app.registerExtension({
         nodeType.prototype.onResize = function () {
             onResize?.apply(this, arguments);
             if (!this._no8dCompareEls) return;
+            syncCompareFrame(this);
             renderCompare(this);
             app.graph?.setDirtyCanvas?.(true, true);
         };
@@ -502,6 +526,12 @@ app.registerExtension({
             }
             renderCompare(this);
             renderHistory(this);
+            requestAnimationFrame(() => {
+                syncCompareFrame(this);
+                renderCompare(this);
+                renderHistory(this);
+                app.graph?.setDirtyCanvas?.(true, true);
+            });
             app.graph?.setDirtyCanvas?.(true, true);
         };
     },
