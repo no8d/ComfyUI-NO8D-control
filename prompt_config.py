@@ -14,6 +14,12 @@ OLD_RULE_NATURAL = "Natural language (Krea-style)"
 OLD_RULE_JSON = "JSON caption (Ideogram-style)"
 RULE_NATURAL = "自然语言"
 RULE_JSON = "json结构"
+RULE_ALIASES = {
+    "Natural language": RULE_NATURAL,
+    "JSON structure": RULE_JSON,
+    OLD_RULE_NATURAL: RULE_NATURAL,
+    OLD_RULE_JSON: RULE_JSON,
+}
 PROMPT_RULE_MODES = {
     RULE_NATURAL: "natural",
     RULE_JSON: "json",
@@ -350,13 +356,19 @@ class PromptConfigManager:
             model = {"name": ""}
         return service, model
 
+    def normalize_prompt_rule_name(self, rule_name):
+        name = str(rule_name or "").strip()
+        return RULE_ALIASES.get(name, name)
+
     def prompt_rule_text(self, rule_name):
+        rule_name = self.normalize_prompt_rule_name(rule_name)
         config = self.load_config()
         rules = config.get("prompt_rules") or {}
         text = rules.get(rule_name) or DEFAULT_PROMPT_RULES.get(rule_name) or ""
         return str(text).strip()
 
     def prompt_rule_mode(self, rule_name):
+        rule_name = self.normalize_prompt_rule_name(rule_name)
         config = self.load_config()
         modes = config.get("prompt_rule_modes") or {}
         mode = str(modes.get(rule_name) or PROMPT_RULE_MODES.get(rule_name) or "natural").strip().lower()

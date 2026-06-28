@@ -37,6 +37,17 @@ _STYLE_PRESETS = (
     "3d写实",
     "3d卡通",
 )
+_STYLE_PRESET_ALIASES = {
+    "Amateur photography": "业余摄影",
+    "Professional photography": "专业摄影",
+    "Cinematic photography": "影视摄影",
+    "Japanese anime": "日式动漫",
+    "American animation": "美式动漫",
+    "Illustration art": "插画艺术",
+    "Oil painting": "油画艺术",
+    "3D realism": "3d写实",
+    "3D cartoon": "3d卡通",
+}
 _STYLE_PRESET_RULES = {
     "业余摄影": "Use a clearly amateur smartphone-photography look. Preserve the visible subject, clothing, styling, and setting, but describe the capture quality as rough and phone-made rather than polished. The final output must include common modern English cues such as phone photo, casual snapshot, handheld framing, available light, spontaneous moment, everyday setting, natural colors, uneven exposure, slight motion blur, phone-camera noise, limited dynamic range, compressed detail, imperfect focus, and believable everyday flaws when appropriate. Make it feel like a real mobile-phone capture or casual social-media photo, not a DSLR shoot, studio setup, commercial advertisement, or polished cinematic still.",
     "专业摄影": "Use a professional photography look: DSLR or mirrorless camera quality, refined commercial/editorial composition, controlled lighting, crisp lens rendering, polished color grading, and high-end advertising or fashion-shoot detail.",
@@ -48,6 +59,10 @@ _STYLE_PRESET_RULES = {
     "3d写实": "Use a photorealistic 3D look: physically based materials, realistic geometry, ray-traced lighting, accurate reflections, natural camera perspective, and high-detail render quality.",
     "3d卡通": "Use a stylized 3D cartoon look: rounded forms, appealing simplified shapes, expressive animation-style characters, clean materials, bright controlled colors, and playful cinematic lighting.",
 }
+
+def _normalize_style_preset(style_preset):
+    preset = str(style_preset or "").strip()
+    return _STYLE_PRESET_ALIASES.get(preset, preset)
 
 def _endpoint_from_base_url(base_url):
     url = str(base_url or "").strip().strip('"').strip("'")
@@ -279,7 +294,7 @@ Write all descriptive JSON string values in fluent, common, modern English.
 
 
 def _style_preset_rule(style_preset):
-    preset = str(style_preset or "").strip()
+    preset = _normalize_style_preset(style_preset)
     return _STYLE_PRESET_RULES.get(preset, _STYLE_PRESET_RULES[_STYLE_PRESETS[1]])
 
 
@@ -432,10 +447,12 @@ class NO8DPromptPlus:
         effective_seed = _safe_int(seed, 0)
         image_data_url, image_hash = _image_to_data_url(image)
         prompt = str(text or "").strip()
+        prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
+        style_preset = _normalize_style_preset(style_preset)
         payload = {
             "prompt": prompt,
-            "prompt_rules": prompt_rules,
-            "prompt_rule_text": prompt_config_manager.prompt_rule_text(prompt_rules),
+            "prompt_rules": prompt_rule,
+            "prompt_rule_text": prompt_config_manager.prompt_rule_text(prompt_rule),
             "style_preset": style_preset,
             "style_preset_rule": _style_preset_rule(style_preset),
             "service_id": service.get("id"),
@@ -461,7 +478,10 @@ class NO8DPromptPlus:
         api_key = service.get("api_key", "") or os.getenv("NO8D_PROMPT_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
         model = model_cfg.get("name", "")
         temperature = _safe_float(model_cfg.get("temperature"), 0.7)
-        prompt_rule = prompt_rules if prompt_rules in prompt_config_manager.prompt_rule_names() else _RULE_NATURAL
+        prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
+        if prompt_rule not in prompt_config_manager.prompt_rule_names():
+            prompt_rule = _RULE_NATURAL
+        style_preset = _normalize_style_preset(style_preset)
         max_tokens = _max_tokens_for_rule(prompt_rule, model_cfg.get("max_tokens", _API_MAX_TOKENS))
         effective_seed = _safe_int(seed, 0)
         messages = _build_messages(prompt, prompt_rule, extra_rules, effective_seed, image_data_url, style_preset)

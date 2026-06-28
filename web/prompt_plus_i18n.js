@@ -21,6 +21,21 @@ const SLOT_LABELS = {
     image: "promptImageInput",
     positive: "promptPositiveOutput",
 };
+const PROMPT_RULE_DISPLAY = {
+    "自然语言": "Natural language",
+    "json结构": "JSON structure",
+};
+const STYLE_DISPLAY = {
+    "业余摄影": "Amateur photography",
+    "专业摄影": "Professional photography",
+    "影视摄影": "Cinematic photography",
+    "日式动漫": "Japanese anime",
+    "美式动漫": "American animation",
+    "插画艺术": "Illustration art",
+    "油画艺术": "Oil painting",
+    "3d写实": "3D realism",
+    "3d卡通": "3D cartoon",
+};
 const PROMPT_PLUS_WIDGET_ORDER = ["prompt_rules", "style_preset", "extra_rules", "seed"];
 let activeLocale = "";
 
@@ -70,6 +85,28 @@ function applySlotLabels(slots) {
     }
 }
 
+function canonicalOptionValue(value, displayMap) {
+    const text = String(value ?? "");
+    if (Object.hasOwn(displayMap, text)) return text;
+    for (const [canonical, translated] of Object.entries(displayMap)) {
+        if (translated === text) return canonical;
+    }
+    return text;
+}
+
+function localizeOptionValue(value, displayMap) {
+    const canonical = canonicalOptionValue(value, displayMap);
+    return no8dLocale() === "zh" ? canonical : (displayMap[canonical] || canonical);
+}
+
+function localizeComboOptions(widget, displayMap) {
+    widget.value = localizeOptionValue(widget.value, displayMap);
+    const values = widget.options?.values;
+    if (Array.isArray(values)) {
+        widget.options.values = values.map((value) => localizeOptionValue(value, displayMap));
+    }
+}
+
 function applyWidgetLabels(node) {
     const cls = nodeClass(node);
     if (cls !== PROMPT_PLUS && cls !== PROMPT_VIEW) return;
@@ -98,6 +135,8 @@ function applyWidgetLabels(node) {
         widget.label = label;
         widget.options = widget.options || {};
         widget.options.label = label;
+        if (widget.name === "prompt_rules") localizeComboOptions(widget, PROMPT_RULE_DISPLAY);
+        if (widget.name === "style_preset") localizeComboOptions(widget, STYLE_DISPLAY);
     }
     applySlotLabels(node.inputs);
     applySlotLabels(node.outputs);
