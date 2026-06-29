@@ -11,6 +11,7 @@ const WIDGET_LABELS = {
     seed: "promptSeed",
     extra_rules: "promptExtraRules",
     style_preset: "promptStylePreset",
+    length_preset: "promptLengthPreset",
     text: "promptTextInput",
     auto_output: "promptViewAuto",
     edited_text: "promptEditedText",
@@ -36,7 +37,12 @@ const STYLE_DISPLAY = {
     "3d写实": "3D realism",
     "3d卡通": "3D cartoon",
 };
-const PROMPT_PLUS_WIDGET_ORDER = ["prompt_rules", "style_preset", "extra_rules", "seed"];
+const LENGTH_DISPLAY = {
+    "标准": "Standard",
+    "详细": "Detailed",
+};
+const LENGTH_VALUES = new Set([...Object.keys(LENGTH_DISPLAY), ...Object.values(LENGTH_DISPLAY)]);
+const PROMPT_PLUS_WIDGET_ORDER = ["prompt_rules", "style_preset", "length_preset", "extra_rules", "seed"];
 let activeLocale = "";
 
 function nodeClass(node) {
@@ -48,6 +54,8 @@ function removeStalePromptPlusWidgets(node) {
     node.widgets = node.widgets.filter((widget) => !STALE_PROMPT_PLUS_WIDGETS.has(widget.name));
     const seed = node.widgets.find((widget) => widget.name === "seed");
     if (seed && !Number.isFinite(Number(seed.value))) seed.value = 0;
+    const length = node.widgets.find((widget) => widget.name === "length_preset");
+    if (length && !LENGTH_VALUES.has(String(length.value || "").trim())) length.value = "标准";
     for (const widget of node.widgets) {
         if (typeof widget.name === "string" && /control_after_generate/i.test(widget.name)) {
             const value = String(widget.value || "").trim();
@@ -137,6 +145,7 @@ function applyWidgetLabels(node) {
         widget.options.label = label;
         if (widget.name === "prompt_rules") localizeComboOptions(widget, PROMPT_RULE_DISPLAY);
         if (widget.name === "style_preset") localizeComboOptions(widget, STYLE_DISPLAY);
+        if (widget.name === "length_preset") localizeComboOptions(widget, LENGTH_DISPLAY);
     }
     applySlotLabels(node.inputs);
     applySlotLabels(node.outputs);

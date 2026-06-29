@@ -23,7 +23,6 @@ from .prompt_config import RULE_NATURAL as _RULE_NATURAL
 from .prompt_config import prompt_config_manager
 
 
-_API_MAX_TOKENS = 700
 _IMAGE_MAX_EDGE = 1024
 _IMAGE_JPEG_QUALITY = 85
 _STYLE_PRESETS = (
@@ -60,10 +59,28 @@ _STYLE_PRESET_RULES = {
     "3d写实": "Use a photorealistic 3D look: physically based materials, realistic geometry, ray-traced lighting, accurate reflections, natural camera perspective, and high-detail render quality.",
     "3d卡通": "Use a stylized 3D cartoon look: rounded forms, appealing simplified shapes, expressive animation-style characters, clean materials, bright controlled colors, and playful cinematic lighting.",
 }
+_LENGTH_PRESETS = ("标准", "详细")
+_LENGTH_PRESET_ALIASES = {
+    "Standard": "标准",
+    "Detailed": "详细",
+}
+_LENGTH_PRESET_INPUTS = _LENGTH_PRESETS + tuple(_LENGTH_PRESET_ALIASES.keys())
+_LENGTH_TOKEN_LIMITS = {
+    "标准": 240,
+    "详细": 480,
+}
+_LENGTH_PRESET_RULES = {
+    "标准": "Target output length: standard, about 120-240 tokens. Keep the prompt focused, compact, and directly useful.",
+    "详细": "Target output length: detailed, about 240-480 tokens. Add richer visual detail while keeping the prompt coherent and avoiding repetitive or conflicting details.",
+}
 
 def _normalize_style_preset(style_preset):
     preset = str(style_preset or "").strip()
     return _STYLE_PRESET_ALIASES.get(preset, preset)
+
+def _normalize_length_preset(length_preset):
+    preset = str(length_preset or "").strip()
+    return _LENGTH_PRESET_ALIASES.get(preset, preset) if preset else "标准"
 
 def _endpoint_from_base_url(base_url):
     url = str(base_url or "").strip().strip('"').strip("'")
@@ -299,7 +316,7 @@ def _style_preset_rule(style_preset):
     return _STYLE_PRESET_RULES.get(preset, _STYLE_PRESET_RULES[_STYLE_PRESETS[1]])
 
 
-def _build_messages(prompt_input, rule, extra_rules, seed, image_data_url="", style_preset="专业摄影"):
+def _build_messages(prompt_input, rule, extra_rules, seed, image_data_url="", style_preset="专业摄影", length_preset="标准"):
     system = (
         _json_system_prompt(rule)
         if prompt_config_manager.prompt_rule_mode(rule) == "json"
@@ -309,6 +326,11 @@ def _build_messages(prompt_input, rule, extra_rules, seed, image_data_url="", st
         "\n\nStyle preset:\n"
         f"{_style_preset_rule(style_preset)}\n"
         "Apply this style preset clearly in the final output. If an input image is provided, reverse-engineer the image content while rewriting the caption in this selected style. Preserve the user's subject and visible facts unless the user explicitly asks for a style transformation."
+    )
+    length_preset = _normalize_length_preset(length_preset)
+    system += (
+        "\n\nOutput length:\n"
+        f"{_LENGTH_PRESET_RULES.get(length_preset, _LENGTH_PRESET_RULES['标准'])}"
     )
     if extra_rules and str(extra_rules).strip():
         system += "\n\nAdditional user rules:\n" + str(extra_rules).strip()
@@ -397,15 +419,9 @@ def _chat_completion(base_url, api_key, model, messages, temperature, max_tokens
     return str(content)
 
 
-def _max_tokens_for_rule(rule_name, configured):
-    configured = _safe_int(configured, 0)
-    if prompt_config_manager.prompt_rule_mode(rule_name) == "json":
-        limit = 760
-    else:
-        limit = 360
-    if configured <= 0:
-        return limit
-    return min(configured, limit)
+def _max_tokens_for_length(length_preset):
+    length_preset = _normalize_length_preset(length_preset)
+    return _LENGTH_TOKEN_LIMITS.get(length_preset, _LENGTH_TOKEN_LIMITS["标准"])
 
 
 def _api_key_fingerprint(api_key):
@@ -429,6 +445,7 @@ class NO8DPromptPlus:
             "required": {
                 "prompt_rules": (prompt_rule_inputs, {"default": _RULE_NATURAL}),
                 "style_preset": (_STYLE_PRESET_INPUTS, {"default": "专业摄影"}),
+                "length_preset": (_LENGTH_PRESET_INPUTS, {"default": "标准"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True}),
                 "extra_rules": ("STRING", {"default": "", "multiline": True}),
             },
@@ -447,19 +464,22 @@ class NO8DPromptPlus:
     CATEGORY = "NO8D-control"
 
     @classmethod
-    def IS_CHANGED(cls, prompt_rules, style_preset="专业摄影", seed=0, extra_rules="", text=None, image=None, unique_id=None):
+    def IS_CHANGED(cls, prompt_rules, style_preset="专业摄影", length_preset="标准", seed=0, extra_rules="", text=None, image=None, unique_id=None):
         service, model_cfg = prompt_config_manager.current_service()
         effective_seed = _safe_int(seed, 0)
         image_data_url, image_hash = _image_to_data_url(image)
         prompt = str(text or "").strip()
         prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
         style_preset = _normalize_style_preset(style_preset)
+        length_preset = _normalize_length_preset(length_preset)
         payload = {
             "prompt": prompt,
             "prompt_rules": prompt_rule,
             "prompt_rule_text": prompt_config_manager.prompt_rule_text(prompt_rule),
             "style_preset": style_preset,
             "style_preset_rule": _style_preset_rule(style_preset),
+            "length_preset": length_preset,
+            "length_preset_rule": _LENGTH_PRESET_RULES.get(length_preset, _LENGTH_PRESET_RULES["标准"]),
             "service_id": service.get("id"),
             "api_base_url": service.get("base_url", ""),
             "model": model_cfg.get("name", ""),
@@ -471,7 +491,7 @@ class NO8DPromptPlus:
         }
         return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
-    def run(self, prompt_rules, style_preset="专业摄影", seed=0, extra_rules="", text=None, image=None, unique_id=None):
+    def run(self, prompt_rules, style_preset="专业摄影", length_preset="标准", seed=0, extra_rules="", text=None, image=None, unique_id=None):
         node_key = str(unique_id or "default")
         prompt = str(text or "").strip()
         image_data_url, image_hash = _image_to_data_url(image)
@@ -487,9 +507,10 @@ class NO8DPromptPlus:
         if prompt_rule not in prompt_config_manager.prompt_rule_names():
             prompt_rule = _RULE_NATURAL
         style_preset = _normalize_style_preset(style_preset)
-        max_tokens = _max_tokens_for_rule(prompt_rule, model_cfg.get("max_tokens", _API_MAX_TOKENS))
+        length_preset = _normalize_length_preset(length_preset)
+        max_tokens = _max_tokens_for_length(length_preset)
         effective_seed = _safe_int(seed, 0)
-        messages = _build_messages(prompt, prompt_rule, extra_rules, effective_seed, image_data_url, style_preset)
+        messages = _build_messages(prompt, prompt_rule, extra_rules, effective_seed, image_data_url, style_preset, length_preset)
         cache_payload = {
             "messages": _message_cache_text(messages),
             "service_id": service.get("id"),
