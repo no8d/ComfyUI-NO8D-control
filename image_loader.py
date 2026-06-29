@@ -24,6 +24,8 @@ except Exception:
 
 
 _API_PREFIX = "/no8d-control/api"
+_THUMB_CACHE = {}
+_THUMB_CACHE_LIMIT = 512
 
 
 def _input_directory():
@@ -112,6 +114,13 @@ def _thumbnail_resample():
         return Image.LANCZOS
 
 
+def _cache_put(key, value):
+    _THUMB_CACHE[key] = value
+    if len(_THUMB_CACHE) > _THUMB_CACHE_LIMIT:
+        for old_key in list(_THUMB_CACHE.keys())[: len(_THUMB_CACHE) - _THUMB_CACHE_LIMIT]:
+            _THUMB_CACHE.pop(old_key, None)
+
+
 def _fingerprint(paths, image_files):
     h = hashlib.sha1()
     h.update(str(image_files or "").encode("utf-8", errors="ignore"))
@@ -178,14 +187,27 @@ if PromptServer is not None and web is not None:
             path = _ref_to_path(ref)
             if not path.is_file():
                 return web.Response(status=404)
+            stat = path.stat()
+            cache_key = (str(path), stat.st_size, stat.st_mtime_ns, size)
+            cached = _THUMB_CACHE.get(cache_key)
+            if cached is not None:
+                return web.Response(body=cached, content_type="image/png")
             with Image.open(path) as image:
                 image = ImageOps.exif_transpose(image)
                 image.thumbnail((size, size), _thumbnail_resample())
-                image = image.convert("RGB")
+                if image.mode in ("RGBA", "LA") or ("transparency" in image.info):
+                    rgba = image.convert("RGBA")
+                    background = Image.new("RGBA", rgba.size, (17, 17, 17, 255))
+                    background.alpha_composite(rgba)
+                    image = background.convert("RGB")
+                else:
+                    image = image.convert("RGB")
                 buffer = BytesIO()
-                image.save(buffer, format="WEBP", quality=76, method=4)
+                image.save(buffer, format="PNG", optimize=True)
                 buffer.seek(0)
-            return web.Response(body=buffer.read(), content_type="image/webp")
+                payload = buffer.read()
+                _cache_put(cache_key, payload)
+            return web.Response(body=payload, content_type="image/png")
         except Exception as exc:
             return web.json_response({"error": str(exc)}, status=400)
 

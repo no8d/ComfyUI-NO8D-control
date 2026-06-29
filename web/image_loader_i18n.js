@@ -14,6 +14,7 @@ const LOADER_MIN_WIDTH = 360;
 const LOADER_MIN_HEIGHT = 180;
 
 let activeLocale = "";
+let renderSeq = 0;
 
 function nodeClass(node) {
     return node?.comfyClass || node?.type || "";
@@ -49,13 +50,16 @@ function setRefs(node, refs) {
     app?.canvas?.setDirty?.(true, true);
 }
 
-function viewUrl(ref) {
-    if (!ref?.name) return "";
-    const params = new URLSearchParams();
-    params.set("filename", ref.name);
-    params.set("type", ref.type || "input");
-    if (ref.subfolder) params.set("subfolder", ref.subfolder);
-    return api.apiURL(`/view?${params.toString()}`);
+function clearStaleSlots(node) {
+    const wantedOutputs = new Set(["images"]);
+    if (Array.isArray(node.outputs)) {
+        for (let i = node.outputs.length - 1; i >= 0; i -= 1) {
+            const output = node.outputs[i];
+            if (wantedOutputs.has(output?.name)) continue;
+            if (typeof node.removeOutput === "function") node.removeOutput(i);
+            else node.outputs.splice(i, 1);
+        }
+    }
 }
 
 function thumbUrl(ref, size) {
@@ -66,6 +70,71 @@ function thumbUrl(ref, size) {
     params.set("size", String(Math.round(size)));
     if (ref.subfolder) params.set("subfolder", ref.subfolder);
     return api.apiURL(`/no8d-control/api/load-images/thumbnail?${params.toString()}`);
+}
+
+function makeThumbItem(ref, size) {
+    const item = document.createElement("div");
+    item.style.cssText = [
+        "display:flex",
+        "flex-direction:column",
+        "gap:4px",
+        "align-items:center",
+        "flex:0 0 auto",
+        `width:${Math.max(64, size + 12)}px`,
+    ].join(";");
+
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.src = thumbUrl(ref, size);
+    img.onerror = () => {
+        const failed = document.createElement("div");
+        failed.textContent = t("imageLoaderThumbFailed");
+        failed.style.cssText = [
+            `width:${size}px`,
+            `height:${size}px`,
+            "display:flex",
+            "align-items:center",
+            "justify-content:center",
+            "text-align:center",
+            "font-size:11px",
+            "line-height:14px",
+            "color:#9ca3af",
+            "border:1px solid #4b5563",
+            "border-radius:4px",
+            "background:#050505",
+            "box-sizing:border-box",
+        ].join(";");
+        img.replaceWith(failed);
+    };
+    img.title = ref.name || "";
+    img.style.cssText = [
+        `width:${size}px`,
+        `height:${size}px`,
+        "object-fit:contain",
+        "border:1px solid #3b82f6",
+        "border-radius:4px",
+        "background:#050505",
+        "flex:0 0 auto",
+        "display:block",
+    ].join(";");
+    item.appendChild(img);
+
+    const name = document.createElement("div");
+    name.textContent = ref.name || "";
+    name.title = ref.name || "";
+    name.style.cssText = [
+        "width:100%",
+        "font-size:10px",
+        "line-height:12px",
+        "color:#9ca3af",
+        "overflow:hidden",
+        "white-space:nowrap",
+        "text-overflow:ellipsis",
+        "text-align:center",
+    ].join(";");
+    item.appendChild(name);
+    return item;
 }
 
 function makeButton(label, onClick) {
@@ -102,6 +171,7 @@ function makeUi(node) {
         "gap:8px",
         "width:100%",
         "height:100%",
+        "min-height:0",
         "box-sizing:border-box",
         "padding:4px 8px 8px",
         "font-family:Arial, sans-serif",
@@ -141,13 +211,20 @@ function makeUi(node) {
     sizeRange.step = "4";
     sizeRange.value = String(thumbSize(node));
     sizeRange.style.cssText = "flex:1; min-width:120px;";
+    let resizeTimer = null;
     sizeRange.addEventListener("pointerdown", (event) => event.stopPropagation());
     sizeRange.addEventListener("input", () => {
         node.properties = node.properties || {};
         node.properties.no8d_image_loader_thumb_size = Number(sizeRange.value);
-        renderLoader(node);
+        sizeLabel.textContent = `${t("imageLoaderThumbSize")}: ${Math.round(thumbSize(node))}px`;
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => renderLoader(node), 180);
         node.graph?.setDirtyCanvas?.(true, true);
         app?.canvas?.setDirty?.(true, true);
+    });
+    sizeRange.addEventListener("change", () => {
+        clearTimeout(resizeTimer);
+        renderLoader(node);
     });
     sizeRow.append(sizeLabel, sizeRange);
 
@@ -157,6 +234,8 @@ function makeUi(node) {
         "gap:10px",
         "align-content:flex-start",
         "min-height:96px",
+        "min-width:0",
+        "min-height:0",
         "height:100%",
         "flex:1 1 auto",
         "padding:8px",
@@ -208,6 +287,8 @@ function makeUi(node) {
 function renderLoader(node) {
     const els = node._no8dImageLoaderEls;
     if (!els) return;
+    clearStaleSlots(node);
+    const seq = ++renderSeq;
     const refs = parseRefs(node);
     const size = thumbSize(node);
     els.load.textContent = t("imageLoaderLoad");
@@ -226,52 +307,18 @@ function renderLoader(node) {
         els.preview.appendChild(empty);
         return;
     }
-    for (const ref of refs) {
-        const item = document.createElement("div");
-        item.style.cssText = [
-            "display:flex",
-            "flex-direction:column",
-            "gap:4px",
-            "align-items:center",
-            "flex:0 0 auto",
-            `width:${Math.max(64, size + 12)}px`,
-        ].join(";");
-
-        const img = document.createElement("img");
-        img.loading = "lazy";
-        img.decoding = "async";
-        img.src = thumbUrl(ref, size);
-        img.onerror = () => {
-            img.onerror = null;
-            img.src = viewUrl(ref);
-        };
-        img.title = ref.name || "";
-        img.style.cssText = [
-            `width:${size}px`,
-            `height:${size}px`,
-            "object-fit:contain",
-            "border:1px solid #3b82f6",
-            "border-radius:4px",
-            "background:#050505",
-            "flex:0 0 auto",
-        ].join(";");
-        item.appendChild(img);
-        const name = document.createElement("div");
-        name.textContent = ref.name || "";
-        name.title = ref.name || "";
-        name.style.cssText = [
-            "width:100%",
-            "font-size:10px",
-            "line-height:12px",
-            "color:#9ca3af",
-            "overflow:hidden",
-            "white-space:nowrap",
-            "text-overflow:ellipsis",
-            "text-align:center",
-        ].join(";");
-        item.appendChild(name);
-        els.preview.appendChild(item);
-    }
+    let index = 0;
+    const appendBatch = () => {
+        if (seq !== renderSeq) return;
+        const fragment = document.createDocumentFragment();
+        const end = Math.min(index + 12, refs.length);
+        for (; index < end; index += 1) {
+            fragment.appendChild(makeThumbItem(refs[index], size));
+        }
+        els.preview.appendChild(fragment);
+        if (index < refs.length) requestAnimationFrame(appendBatch);
+    };
+    appendBatch();
 }
 
 function hideInternalWidgets(node) {
