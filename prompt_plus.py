@@ -187,6 +187,22 @@ def _images_to_data_urls(images):
     if images is None:
         return []
     try:
+        if isinstance(images, (list, tuple)):
+            encoded = []
+            for image in images:
+                if image is None:
+                    continue
+                arr = image.detach().cpu().numpy() if hasattr(image, "detach") else np.asarray(image)
+                if arr.ndim == 4:
+                    for item in arr:
+                        data_url, image_hash = _image_array_to_data_url(item)
+                        if data_url:
+                            encoded.append((data_url, image_hash))
+                elif arr.ndim == 3:
+                    data_url, image_hash = _image_array_to_data_url(arr)
+                    if data_url:
+                        encoded.append((data_url, image_hash))
+            return encoded
         arr = images
         if hasattr(arr, "detach"):
             arr = arr.detach().cpu().numpy()

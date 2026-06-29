@@ -68,7 +68,7 @@ function ensureInternalWidgets(node) {
 
 function thumbSize(node) {
     const value = Number(node.properties?.no8d_image_loader_thumb_size);
-    return Number.isFinite(value) ? Math.max(56, Math.min(220, value)) : 96;
+    return Number.isFinite(value) ? Math.max(90, Math.min(180, value)) : 120;
 }
 
 function imageKey(ref) {
@@ -107,6 +107,14 @@ function setRefs(node, refs) {
     node.graph?.change?.();
     node.graph?.setDirtyCanvas?.(true, true);
     app?.canvas?.setDirty?.(true, true);
+}
+
+function selectedRefs(node) {
+    const refs = parseRefs(node);
+    return [...selectedSet(node)]
+        .sort((a, b) => a - b)
+        .map((index) => refs[index])
+        .filter(Boolean);
 }
 
 function setOutputRefs(node, refs) {
@@ -173,9 +181,51 @@ function thumbUrl(ref, size) {
     return api.apiURL(`/no8d-control/api/load-images/thumbnail?${params.toString()}`);
 }
 
-function makeThumbItem(node, ref, index, size, selected, outputKeys) {
+async function imageFileMeta(file) {
+    const meta = { size: file?.size || 0 };
+    if (!file) return meta;
+    if (typeof createImageBitmap === "function") {
+        try {
+            const bitmap = await createImageBitmap(file);
+            meta.width = bitmap.width;
+            meta.height = bitmap.height;
+            bitmap.close?.();
+            return meta;
+        } catch (_) {
+            // Fall back to an object URL image below.
+        }
+    }
+    return await new Promise((resolve) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        const done = () => {
+            URL.revokeObjectURL(url);
+            resolve(meta);
+        };
+        img.onload = () => {
+            meta.width = img.naturalWidth || 0;
+            meta.height = img.naturalHeight || 0;
+            done();
+        };
+        img.onerror = done;
+        img.src = url;
+    });
+}
+
+function formatImageDetails(ref) {
+    if (!ref) return "";
+    const parts = [ref.name || ""];
+    const width = Number(ref.width);
+    const height = Number(ref.height);
+    const size = Number(ref.size);
+    if (width && height) parts.push(`${width}x${height}`);
+    if (size) parts.push(`${(size / 1024 / 1024).toFixed(2)} MB`);
+    if (ref.type) parts.push(ref.type);
+    return parts.filter(Boolean).join("  |  ");
+}
+
+function makeThumbItem(node, ref, index, size, selected) {
     const isSelected = selected.has(index);
-    const isOutput = outputKeys.has(imageKey(ref));
     const item = document.createElement("div");
     item.style.cssText = [
         "display:flex",
@@ -209,7 +259,8 @@ function makeThumbItem(node, ref, index, size, selected, outputKeys) {
             else next.add(index);
             node._no8dImageLoaderAnchor = index;
         } else {
-            next.add(index);
+            if (current.size === 1 && current.has(index)) next.delete(index);
+            else next.add(index);
             node._no8dImageLoaderAnchor = index;
         }
         syncSelection(node, next);
@@ -217,6 +268,8 @@ function makeThumbItem(node, ref, index, size, selected, outputKeys) {
     item.addEventListener("dblclick", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        node._no8dImageLoaderAnchor = index;
+        node._no8dImageLoaderSelected = new Set([index]);
         setOutputRefs(node, [ref]);
     });
 
@@ -249,7 +302,7 @@ function makeThumbItem(node, ref, index, size, selected, outputKeys) {
         `width:${size}px`,
         `height:${size}px`,
         "object-fit:contain",
-        `border:${isSelected ? 3 : 1}px solid ${isOutput ? "#22c55e" : isSelected ? "#f59e0b" : "#3b82f6"}`,
+        `border:${isSelected ? 3 : 1}px solid ${isSelected ? "#3b82f6" : "#4b5563"}`,
         "border-radius:4px",
         "background:#050505",
         "flex:0 0 auto",
@@ -344,8 +397,8 @@ function makeUi(node) {
 
     const sizeRange = document.createElement("input");
     sizeRange.type = "range";
-    sizeRange.min = "56";
-    sizeRange.max = "220";
+    sizeRange.min = "90";
+    sizeRange.max = "180";
     sizeRange.step = "4";
     sizeRange.value = String(thumbSize(node));
     sizeRange.style.cssText = "flex:1; min-width:120px;";
@@ -401,6 +454,17 @@ function makeUi(node) {
         "z-index:2",
     ].join(";");
     preview.appendChild(selectionBox);
+
+    const details = document.createElement("div");
+    details.style.cssText = [
+        "min-height:18px",
+        "color:#9ca3af",
+        "font-size:12px",
+        "line-height:16px",
+        "overflow:hidden",
+        "white-space:nowrap",
+        "text-overflow:ellipsis",
+    ].join(";");
 
     let boxStart = null;
     preview.addEventListener("pointerdown", (event) => {
@@ -494,6 +558,7 @@ function makeUi(node) {
         try {
             const refs = [];
             for (const file of files) {
+                const meta = await imageFileMeta(file);
                 const body = new FormData();
                 body.append("image", file);
                 body.append("type", "input");
@@ -505,6 +570,9 @@ function makeUi(node) {
                     name: data.name,
                     subfolder: data.subfolder || "",
                     type: data.type || "input",
+                    width: meta.width || 0,
+                    height: meta.height || 0,
+                    size: meta.size || 0,
                 });
             }
             node._no8dImageLoaderSelected = new Set();
@@ -519,8 +587,8 @@ function makeUi(node) {
         }
     });
 
-    root.append(row, sizeRow, preview);
-    node._no8dImageLoaderEls = { root, load, status, sizeLabel, sizeRange, preview, selectionBox };
+    root.append(row, sizeRow, details, preview);
+    node._no8dImageLoaderEls = { root, load, status, sizeLabel, sizeRange, details, preview, selectionBox };
     return root;
 }
 
@@ -532,7 +600,6 @@ function renderLoader(node) {
     const refs = parseRefs(node);
     const selected = selectedSet(node);
     const outputRefs = parseOutputRefs(node);
-    const outputKeys = new Set(outputRefs.map(imageKey));
     const size = thumbSize(node);
     els.load.textContent = t("imageLoaderLoad");
     els.sizeLabel.textContent = `${t("imageLoaderThumbSize")}: ${Math.round(size)}px`;
@@ -543,6 +610,14 @@ function renderLoader(node) {
     els.status.textContent = refs.length
         ? `${refs.length} ${t("imageLoaderSelected")}, ${selected.size} ${t("imageLoaderSelectedCount")}${outputText}`
         : t("imageLoaderEmpty");
+    const selectedInfo = selectedRefs(node);
+    if (selectedInfo.length === 1) {
+        els.details.textContent = formatImageDetails(selectedInfo[0]);
+    } else if (selectedInfo.length > 1) {
+        els.details.textContent = `${selectedInfo.length} ${t("imageLoaderSelectedCount")}`;
+    } else {
+        els.details.textContent = "";
+    }
     els.preview.replaceChildren();
     if (els.selectionBox) els.preview.appendChild(els.selectionBox);
     els.preview.style.alignItems = "flex-start";
@@ -559,7 +634,7 @@ function renderLoader(node) {
         const fragment = document.createDocumentFragment();
         const end = Math.min(index + 12, refs.length);
         for (; index < end; index += 1) {
-            fragment.appendChild(makeThumbItem(node, refs[index], index, size, selected, outputKeys));
+            fragment.appendChild(makeThumbItem(node, refs[index], index, size, selected));
         }
         els.preview.appendChild(fragment);
         if (index < refs.length) requestAnimationFrame(appendBatch);
