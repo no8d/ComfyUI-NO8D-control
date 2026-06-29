@@ -70,7 +70,7 @@ function ensureInternalWidgets(node) {
 
 function thumbSize(node) {
     const value = Number(node.properties?.no8d_image_loader_thumb_size);
-    return Number.isFinite(value) ? Math.max(90, Math.min(180, value)) : 120;
+    return Number.isFinite(value) ? Math.max(80, Math.min(200, value)) : 140;
 }
 
 function imageKey(ref) {
@@ -139,6 +139,63 @@ function selectedRefs(node) {
 function totalSizeText(refs) {
     const total = refs.reduce((sum, ref) => sum + (Number(ref?.size) || 0), 0);
     return total ? `${(total / 1024 / 1024).toFixed(2)} MB` : "";
+}
+
+function collectDownstreamNodeIds(node) {
+    const graph = node?.graph || app?.graph;
+    const result = new Set();
+    const pending = [];
+    for (const output of node.outputs || []) {
+        for (const linkId of output.links || []) {
+            const link = graph?.links?.[linkId];
+            if (link?.target_id != null) pending.push(link.target_id);
+        }
+    }
+    while (pending.length) {
+        const id = pending.shift();
+        if (id == null || result.has(String(id))) continue;
+        result.add(String(id));
+        const next = graph?.getNodeById?.(id);
+        for (const output of next?.outputs || []) {
+            for (const linkId of output.links || []) {
+                const link = graph?.links?.[linkId];
+                if (link?.target_id != null) pending.push(link.target_id);
+            }
+        }
+    }
+    if (!result.size && node?.id != null) result.add(String(node.id));
+    return [...result];
+}
+
+async function queueSingleImageRun(node, outputRefs) {
+    try {
+        if (typeof app.graphToPrompt !== "function" || typeof app.api?.queuePrompt !== "function") {
+            throw new Error("ComfyUI queue API is unavailable");
+        }
+        const prompt = await app.graphToPrompt();
+        const queuedNode = prompt?.output?.[String(node.id)];
+        if (!queuedNode?.inputs) throw new Error("NO8D-Load-images is not present in the queued prompt");
+        queuedNode.inputs.output_files = JSON.stringify(outputRefs);
+        await app.api.queuePrompt(0, prompt, { partialExecutionTargets: collectDownstreamNodeIds(node) });
+    } catch (error) {
+        app.extensionManager?.toast?.add?.({
+            severity: "warn",
+            summary: t("imageLoaderTitle"),
+            detail: error?.message || String(error),
+            life: 3000,
+        });
+    }
+}
+
+function runSingleImage(node, index, ref) {
+    const key = imageKey(ref);
+    const now = performance.now();
+    if (node._no8dImageLoaderLastRun?.key === key && now - node._no8dImageLoaderLastRun.time < 600) return;
+    node._no8dImageLoaderLastRun = { key, time: now };
+    node._no8dImageLoaderAnchor = index;
+    node._no8dImageLoaderSelected = new Set([index]);
+    setImageAndOutputRefs(node, parseRefs(node), [ref]);
+    queueSingleImageRun(node, [ref]);
 }
 
 function setOutputRefs(node, refs) {
@@ -343,9 +400,7 @@ function makeThumbItem(node, ref, index, size, selected) {
         event.preventDefault();
         event.stopPropagation();
         if (event.detail >= 2) {
-            node._no8dImageLoaderAnchor = index;
-            node._no8dImageLoaderSelected = new Set([index]);
-            setImageAndOutputRefs(node, parseRefs(node), [ref]);
+            runSingleImage(node, index, ref);
             return;
         }
         const refs = parseRefs(node);
@@ -371,9 +426,7 @@ function makeThumbItem(node, ref, index, size, selected) {
     item.addEventListener("dblclick", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        node._no8dImageLoaderAnchor = index;
-        node._no8dImageLoaderSelected = new Set([index]);
-        setImageAndOutputRefs(node, parseRefs(node), [ref]);
+        runSingleImage(node, index, ref);
     });
 
     const img = document.createElement("img");
@@ -502,17 +555,17 @@ function makeUi(node) {
 
     const sizeRange = document.createElement("input");
     sizeRange.type = "range";
-    sizeRange.min = "90";
-    sizeRange.max = "180";
-    sizeRange.step = "1";
+    sizeRange.min = "80";
+    sizeRange.max = "200";
+    sizeRange.step = "5";
     sizeRange.value = String(thumbSize(node));
-    sizeRange.style.cssText = "width:160px; min-width:120px;";
+    sizeRange.style.cssText = "flex:1 1 160px; min-width:120px;";
     let resizeTimer = null;
     sizeRange.addEventListener("pointerdown", (event) => event.stopPropagation());
     sizeRange.addEventListener("input", () => {
         node.properties = node.properties || {};
         node.properties.no8d_image_loader_thumb_size = Number(sizeRange.value);
-        sizeLabel.textContent = `${t("imageLoaderThumbSize")}: ${Math.round(thumbSize(node))}px`;
+        sizeLabel.textContent = t("imageLoaderThumbSize");
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => renderLoader(node), 180);
         node.graph?.setDirtyCanvas?.(true, true);
@@ -704,7 +757,7 @@ function renderLoader(node) {
     const size = thumbSize(node);
     els.load.textContent = t("imageLoaderLoad");
     els.add.textContent = t("imageLoaderAdd");
-    els.sizeLabel.textContent = `${t("imageLoaderThumbSize")}: ${Math.round(size)}px`;
+    els.sizeLabel.textContent = t("imageLoaderThumbSize");
     if (Number(els.sizeRange.value) !== size) {
         els.sizeRange.value = String(size);
     }
