@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -26,16 +27,6 @@ def _input_directory():
     return os.getcwd()
 
 
-def _resolve_folder(folder_path):
-    text = str(folder_path or "").strip().strip('"').strip("'")
-    if not text:
-        return Path(_input_directory()).resolve()
-    path = Path(text).expanduser()
-    if not path.is_absolute():
-        path = Path(_input_directory()) / path
-    return path.resolve()
-
-
 def _safe_int(value, default=0):
     try:
         return int(float(value))
@@ -43,21 +34,58 @@ def _safe_int(value, default=0):
         return default
 
 
-def _iter_image_paths(folder, recursive):
-    pattern = "**/*" if recursive else "*"
-    files = []
-    for path in folder.glob(pattern):
-        if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS:
-            files.append(path)
-    return files
+def _base_directory(image_type):
+    if folder_paths is not None:
+        getters = {
+            "input": "get_input_directory",
+            "output": "get_output_directory",
+            "temp": "get_temp_directory",
+        }
+        getter = getattr(folder_paths, getters.get(str(image_type or "input"), "get_input_directory"), None)
+        if getter is not None:
+            try:
+                return Path(getter()).resolve()
+            except Exception:
+                pass
+    return Path(_input_directory()).resolve()
 
 
-def _sort_paths(paths, sort_by, order):
-    sort_by = str(sort_by or "name")
-    reverse = str(order or "ascending") == "descending"
-    if sort_by == "modified":
-        return sorted(paths, key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=reverse)
-    return sorted(paths, key=lambda path: str(path).lower(), reverse=reverse)
+def _parse_image_refs(image_files):
+    if isinstance(image_files, list):
+        refs = image_files
+    else:
+        text = str(image_files or "").strip()
+        if not text:
+            return []
+        try:
+            refs = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("NO8D-Load-images: image list is not valid JSON.") from exc
+    if not isinstance(refs, list):
+        raise ValueError("NO8D-Load-images: image list must be a JSON array.")
+    return refs
+
+
+def _ref_to_path(ref):
+    if isinstance(ref, str):
+        text = ref.strip()
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            path = _base_directory("input") / path
+        return path.resolve()
+
+    if not isinstance(ref, dict):
+        raise ValueError("NO8D-Load-images: each image reference must be a string or an object.")
+
+    name = str(ref.get("name") or "").strip()
+    if not name:
+        raise ValueError("NO8D-Load-images: image reference missing name.")
+    subfolder = str(ref.get("subfolder") or "").strip().strip("/\\")
+    image_type = str(ref.get("type") or "input").strip() or "input"
+    path = _base_directory(image_type)
+    if subfolder:
+        path = path / subfolder
+    return (path / name).resolve()
 
 
 def _load_image(path):
@@ -70,12 +98,9 @@ def _load_image(path):
     return torch.from_numpy(arr)[None,]
 
 
-def _fingerprint(paths, folder, recursive, sort_by, order, start_index, max_images):
+def _fingerprint(paths, image_files, start_index, max_images):
     h = hashlib.sha1()
-    h.update(str(folder).encode("utf-8", errors="ignore"))
-    h.update(str(bool(recursive)).encode())
-    h.update(str(sort_by).encode())
-    h.update(str(order).encode())
+    h.update(str(image_files or "").encode("utf-8", errors="ignore"))
     h.update(str(start_index).encode())
     h.update(str(max_images).encode())
     for path in paths:
@@ -94,10 +119,7 @@ class NO8DLoadImages:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "folder_path": ("STRING", {"default": "", "multiline": False}),
-                "recursive": ("BOOLEAN", {"default": False}),
-                "sort_by": (["name", "modified"], {"default": "name"}),
-                "order": (["ascending", "descending"], {"default": "ascending"}),
+                "image_files": ("STRING", {"default": "[]", "multiline": False}),
                 "start_index": ("INT", {"default": 0, "min": 0, "max": 1000000, "step": 1}),
                 "max_images": ("INT", {"default": 0, "min": 0, "max": 1000000, "step": 1}),
             },
@@ -110,27 +132,26 @@ class NO8DLoadImages:
     CATEGORY = "NO8D-control"
 
     @classmethod
-    def IS_CHANGED(cls, folder_path="", recursive=False, sort_by="name", order="ascending", start_index=0, max_images=0):
-        folder = _resolve_folder(folder_path)
-        if not folder.is_dir():
-            return f"missing:{folder}"
-        paths = _sort_paths(_iter_image_paths(folder, recursive), sort_by, order)
+    def IS_CHANGED(cls, image_files="[]", start_index=0, max_images=0):
+        refs = _parse_image_refs(image_files)
+        paths = [_ref_to_path(ref) for ref in refs]
         start = max(0, _safe_int(start_index, 0))
         limit = max(0, _safe_int(max_images, 0))
         selected = paths[start:] if limit <= 0 else paths[start:start + limit]
-        return _fingerprint(selected, folder, recursive, sort_by, order, start, limit)
+        return _fingerprint(selected, image_files, start, limit)
 
-    def load(self, folder_path="", recursive=False, sort_by="name", order="ascending", start_index=0, max_images=0):
-        folder = _resolve_folder(folder_path)
-        if not folder.is_dir():
-            raise FileNotFoundError(f"NO8D-Load-images: folder not found: {folder}")
-
-        paths = _sort_paths(_iter_image_paths(folder, recursive), sort_by, order)
+    def load(self, image_files="[]", start_index=0, max_images=0):
+        refs = _parse_image_refs(image_files)
+        paths = [_ref_to_path(ref) for ref in refs]
         start = max(0, _safe_int(start_index, 0))
         limit = max(0, _safe_int(max_images, 0))
         selected = paths[start:] if limit <= 0 else paths[start:start + limit]
         if not selected:
-            raise ValueError(f"NO8D-Load-images: no images found in {folder}")
+            raise ValueError("NO8D-Load-images: no images selected.")
+
+        missing = [str(path) for path in selected if not path.is_file()]
+        if missing:
+            raise FileNotFoundError("NO8D-Load-images: image not found: " + missing[0])
 
         images = [_load_image(path) for path in selected]
         path_texts = [str(path) for path in selected]
