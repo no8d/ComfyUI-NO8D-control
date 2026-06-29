@@ -374,6 +374,7 @@ def _build_messages(prompt_input, rule, extra_rules, seed, image_data_url="", st
         if prompt_config_manager.prompt_rule_mode(rule) == "json"
         else _natural_system_prompt(rule)
     )
+    extra_rules_text = str(extra_rules or "").strip()
     system += (
         "\n\nStyle preset:\n"
         f"{_style_preset_rule(style_preset)}\n"
@@ -389,11 +390,17 @@ def _build_messages(prompt_input, rule, extra_rules, seed, image_data_url="", st
         system += "\n\nOutput language:\nWrite the final caption in fluent, natural Simplified Chinese. For JSON output, keep all keys exactly as required, but write descriptive string values in Simplified Chinese."
     else:
         system += "\n\nOutput language:\nWrite the final caption in fluent, common, modern English."
-    if extra_rules and str(extra_rules).strip():
-        system += "\n\nAdditional user rules:\n" + str(extra_rules).strip()
+    if extra_rules_text:
+        system += (
+            "\n\nAdditional user rules, highest priority:\n"
+            f"{extra_rules_text}\n"
+            "Apply these additional rules to every image independently. If they conflict with the style preset, length guidance, or default writing rules, follow the additional user rules. If they ask you not to describe a visible detail, omit that detail."
+        )
     prompt_text = str(prompt_input or "").strip()
     if image_data_url:
         instruction = prompt_text or "Reverse-engineer this image into a high-quality prompt following the selected output rules."
+        if extra_rules_text:
+            instruction += "\n\nAdditional rules that must be applied to this image:\n" + extra_rules_text
         user_content = [
             {"type": "text", "text": f"User request:\n{instruction}"},
             {"type": "image_url", "image_url": {"url": image_data_url}},
