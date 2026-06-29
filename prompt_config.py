@@ -117,6 +117,8 @@ def _looks_like_old_builtin_rule(rule_name, text):
             or "Krea 2" in text
             or "Krea's aesthetic potential" in text
             or "Keep the final prompt between 90 and 180 English words" in text
+            or "standard output should stay around 120-240 tokens, and detailed output should stay around 240-480 tokens" in text
+            or "Follow the node's selected token length preset" in text
         )
     if rule_name == RULE_JSON:
         return (
@@ -169,8 +171,7 @@ Strict output rules:
 1. Output only the final English positive prompt.
 2. Start directly with the image description.
 3. Write one cohesive paragraph.
-4. Follow the node's selected token length preset: standard output should stay around 120-240 tokens, and detailed output should stay around 240-480 tokens.
-5. Do not output explanations, markdown, bullets, JSON, labels, negative prompts, parameter syntax, or thinking tags.""",
+4. Do not output explanations, markdown, bullets, JSON, labels, negative prompts, parameter syntax, or thinking tags.""",
     RULE_JSON: RECENT_DEFAULT_PROMPT_RULES[RULE_JSON],
 }
 

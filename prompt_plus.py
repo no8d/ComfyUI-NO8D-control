@@ -70,8 +70,8 @@ _LENGTH_TOKEN_LIMITS = {
     "详细": 480,
 }
 _LENGTH_PRESET_RULES = {
-    "标准": "Target output length: standard, about 120-240 tokens. Keep the prompt focused, compact, and directly useful.",
-    "详细": "Target output length: detailed, about 240-480 tokens. Add richer visual detail while keeping the prompt coherent and avoiding repetitive or conflicting details.",
+    "标准": "Target output length: standard, about 120-240 tokens. For natural-language output, write a compact single paragraph with about 3-5 clear sentences. Prioritize the subject, action, setting, composition, lighting, medium, and mood. Do not pad the prompt with secondary details.",
+    "详细": "Target output length: detailed, about 240-480 tokens. For natural-language output, write a visibly longer single paragraph with about 6-10 rich sentences. Add more concrete visual evidence: subject details, pose, spatial layout, foreground and background, lighting direction, materials, textures, color relationships, camera or medium language, atmosphere, and visible text when present. The detailed result must be substantially more developed than the standard result while staying coherent and non-repetitive.",
 }
 
 def _normalize_style_preset(style_preset):
