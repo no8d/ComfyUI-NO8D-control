@@ -88,17 +88,6 @@ function parseRefs(node) {
     }
 }
 
-function parseOutputRefs(node) {
-    const widget = outputWidget(node);
-    if (!widget?.value) return [];
-    try {
-        const refs = JSON.parse(widget.value);
-        return Array.isArray(refs) ? refs : [];
-    } catch (_) {
-        return [];
-    }
-}
-
 function setRefs(node, refs) {
     ensureInternalWidgets(node);
     const widget = imageWidget(node);
@@ -126,6 +115,17 @@ function setImageAndOutputRefs(node, imageRefs, outputRefs = []) {
     node.graph?.change?.();
     node.graph?.setDirtyCanvas?.(true, true);
     app?.canvas?.setDirty?.(true, true);
+}
+
+function clearStoredOutputRefs(node) {
+    ensureInternalWidgets(node);
+    const output = outputWidget(node);
+    if (!output) return;
+    if (output.value === "[]") return;
+    output.value = "[]";
+    output.callback?.(output.value);
+    node.properties = node.properties || {};
+    node.properties.no8d_image_loader_output_keys = [];
 }
 
 function selectedRefs(node) {
@@ -194,22 +194,12 @@ function runSingleImage(node, index, ref) {
     node._no8dImageLoaderLastRun = { key, time: now };
     node._no8dImageLoaderAnchor = index;
     node._no8dImageLoaderSelected = new Set([index]);
-    setImageAndOutputRefs(node, parseRefs(node), [ref]);
-    queueSingleImageRun(node, [ref]);
-}
-
-function setOutputRefs(node, refs) {
-    ensureInternalWidgets(node);
-    const widget = outputWidget(node);
-    if (!widget) return;
-    widget.value = JSON.stringify(refs);
-    widget.callback?.(widget.value);
-    node.properties = node.properties || {};
-    node.properties.no8d_image_loader_output_keys = refs.map(imageKey);
+    clearStoredOutputRefs(node);
     renderLoader(node);
     node.graph?.change?.();
     node.graph?.setDirtyCanvas?.(true, true);
     app?.canvas?.setDirty?.(true, true);
+    queueSingleImageRun(node, [ref]);
 }
 
 function selectedSet(node) {
@@ -229,10 +219,8 @@ function removeSelected(node) {
     const selected = selectedSet(node);
     if (!selected.size) return;
     const next = refs.filter((_, index) => !selected.has(index));
-    const outputKeys = new Set(parseOutputRefs(node).map(imageKey));
-    const nextOutput = next.filter((ref) => outputKeys.has(imageKey(ref)));
     node._no8dImageLoaderSelected = new Set();
-    setImageAndOutputRefs(node, next, nextOutput);
+    setImageAndOutputRefs(node, next, []);
 }
 
 function clearImages(node) {
@@ -314,7 +302,7 @@ function reorderRefs(node, fromIndex, toIndex) {
     selected.add(toIndex);
     node._no8dImageLoaderSelected = selected;
     node._no8dImageLoaderAnchor = toIndex;
-    setImageAndOutputRefs(node, refs, parseOutputRefs(node));
+    setImageAndOutputRefs(node, refs, []);
 }
 
 function uploadImages(node, files, append = false) {
@@ -753,7 +741,7 @@ function renderLoader(node) {
     const seq = ++renderSeq;
     const refs = parseRefs(node);
     const selected = selectedSet(node);
-    const outputRefs = parseOutputRefs(node);
+    clearStoredOutputRefs(node);
     const size = thumbSize(node);
     els.load.textContent = t("imageLoaderLoad");
     els.add.textContent = t("imageLoaderAdd");
@@ -761,7 +749,6 @@ function renderLoader(node) {
     if (Number(els.sizeRange.value) !== size) {
         els.sizeRange.value = String(size);
     }
-    const outputText = outputRefs.length ? `, ${t("imageLoaderOutputSingle")}` : "";
     const selectedInfo = selectedRefs(node);
     let detailText = "";
     if (selectedInfo.length === 1) {
@@ -771,7 +758,7 @@ function renderLoader(node) {
         detailText = total ? `${selectedInfo.length} ${t("imageLoaderSelectedCount")} | ${total}` : `${selectedInfo.length} ${t("imageLoaderSelectedCount")}`;
     }
     els.status.textContent = refs.length
-        ? `${refs.length} ${t("imageLoaderSelected")}, ${selected.size} ${t("imageLoaderSelectedCount")}${outputText}`
+        ? `${refs.length} ${t("imageLoaderSelected")}, ${selected.size} ${t("imageLoaderSelectedCount")}`
         : t("imageLoaderEmpty");
     els.details.textContent = detailText;
     els.preview.replaceChildren();
