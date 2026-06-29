@@ -12,6 +12,9 @@ const SLOT_LABELS = {
 };
 const LOADER_MIN_WIDTH = 390;
 const LOADER_MIN_HEIGHT = 180;
+const THUMB_MIN_SIZE = 80;
+const THUMB_MAX_SIZE = 240;
+const THUMB_DEFAULT_SIZE = 140;
 const DRAG_MIME = "application/x-no8d-image-loader-index";
 
 let activeLocale = "";
@@ -70,7 +73,7 @@ function ensureInternalWidgets(node) {
 
 function thumbSize(node) {
     const value = Number(node.properties?.no8d_image_loader_thumb_size);
-    return Number.isFinite(value) ? Math.max(80, Math.min(200, value)) : 140;
+    return Number.isFinite(value) ? Math.max(THUMB_MIN_SIZE, Math.min(THUMB_MAX_SIZE, value)) : THUMB_DEFAULT_SIZE;
 }
 
 function imageKey(ref) {
@@ -470,10 +473,22 @@ function makeThumbItem(node, ref, index, size, selected) {
 
 function setThumbSize(node, value) {
     node.properties = node.properties || {};
-    node.properties.no8d_image_loader_thumb_size = Math.max(80, Math.min(200, Number(value) || 140));
+    node.properties.no8d_image_loader_thumb_size = Math.max(THUMB_MIN_SIZE, Math.min(THUMB_MAX_SIZE, Number(value) || THUMB_DEFAULT_SIZE));
     renderLoader(node);
     node.graph?.setDirtyCanvas?.(true, true);
     app?.canvas?.setDirty?.(true, true);
+}
+
+function toggleMaxThumbSize(node) {
+    node.properties = node.properties || {};
+    const current = thumbSize(node);
+    if (current >= THUMB_MAX_SIZE) {
+        const previous = Number(node.properties.no8d_image_loader_prev_thumb_size);
+        setThumbSize(node, Number.isFinite(previous) && previous < THUMB_MAX_SIZE ? previous : THUMB_DEFAULT_SIZE);
+        return;
+    }
+    node.properties.no8d_image_loader_prev_thumb_size = current;
+    setThumbSize(node, THUMB_MAX_SIZE);
 }
 
 function makeIconButton(label, icon, onClick) {
@@ -551,7 +566,7 @@ function makeUi(node) {
     const load = makeIconButton(t("imageLoaderLoad"), folderIcon, () => input.click());
     load.style.borderColor = "#3b82f6";
 
-    const maxSize = makeIconButton(t("imageLoaderMaxThumbSize"), maxIcon, () => setThumbSize(node, 200));
+    const maxSize = makeIconButton(t("imageLoaderMaxThumbSize"), maxIcon, () => toggleMaxThumbSize(node));
     maxSize.style.borderColor = "#3b82f6";
 
     const sizeLabel = document.createElement("div");
@@ -559,8 +574,8 @@ function makeUi(node) {
 
     const sizeRange = document.createElement("input");
     sizeRange.type = "range";
-    sizeRange.min = "80";
-    sizeRange.max = "200";
+    sizeRange.min = String(THUMB_MIN_SIZE);
+    sizeRange.max = String(THUMB_MAX_SIZE);
     sizeRange.step = "5";
     sizeRange.value = String(thumbSize(node));
     sizeRange.style.cssText = "flex:1 1 auto; min-width:0; width:100%;";
@@ -568,7 +583,11 @@ function makeUi(node) {
     sizeRange.addEventListener("pointerdown", (event) => event.stopPropagation());
     sizeRange.addEventListener("input", () => {
         node.properties = node.properties || {};
-        node.properties.no8d_image_loader_thumb_size = Number(sizeRange.value);
+        const nextSize = Number(sizeRange.value);
+        node.properties.no8d_image_loader_thumb_size = nextSize;
+        if (nextSize < THUMB_MAX_SIZE) {
+            node.properties.no8d_image_loader_prev_thumb_size = nextSize;
+        }
         sizeLabel.textContent = t("imageLoaderThumbSize");
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => renderLoader(node), 180);
@@ -865,8 +884,18 @@ function installLoaderUi(node) {
     const widget = node.addDOMWidget("no8d_image_loader", "image_loader", root, {
         serialize: false,
         hideOnZoom: false,
+        getMinWidth: () => LOADER_MIN_WIDTH,
+        getMinHeight: () => LOADER_MIN_HEIGHT,
     });
     widget.serialize = false;
+    const originalComputeSize = typeof widget.computeSize === "function" ? widget.computeSize.bind(widget) : null;
+    widget.computeSize = (width) => {
+        const size = originalComputeSize?.(width) || [width || LOADER_MIN_WIDTH, LOADER_MIN_HEIGHT];
+        return [
+            Math.max(width || size[0] || LOADER_MIN_WIDTH, LOADER_MIN_WIDTH),
+            Math.max(size[1] || LOADER_MIN_HEIGHT, LOADER_MIN_HEIGHT),
+        ];
+    };
     widget.computeLayoutSize = () => ({
         minWidth: LOADER_MIN_WIDTH,
         minHeight: LOADER_MIN_HEIGHT,
@@ -911,6 +940,13 @@ app.registerExtension({
             onCreated?.apply(this, arguments);
             installLoaderUi(this);
             applyLabels(this);
+        };
+        const onResize = nodeType.prototype.onResize;
+        nodeType.prototype.onResize = function () {
+            onResize?.apply(this, arguments);
+            if (!this._no8dImageLoaderEls) return;
+            this.graph?.setDirtyCanvas?.(true, true);
+            app?.canvas?.setDirty?.(true, true);
         };
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
