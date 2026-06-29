@@ -888,14 +888,6 @@ function installLoaderUi(node) {
         getMinHeight: () => LOADER_MIN_HEIGHT,
     });
     widget.serialize = false;
-    const originalComputeSize = typeof widget.computeSize === "function" ? widget.computeSize.bind(widget) : null;
-    widget.computeSize = (width) => {
-        const size = originalComputeSize?.(width) || [width || LOADER_MIN_WIDTH, LOADER_MIN_HEIGHT];
-        return [
-            Math.max(width || size[0] || LOADER_MIN_WIDTH, LOADER_MIN_WIDTH),
-            Math.max(size[1] || LOADER_MIN_HEIGHT, LOADER_MIN_HEIGHT),
-        ];
-    };
     widget.computeLayoutSize = () => ({
         minWidth: LOADER_MIN_WIDTH,
         minHeight: LOADER_MIN_HEIGHT,
