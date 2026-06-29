@@ -26,7 +26,6 @@ const SLOT_LABELS = {
     image: "promptImageInput",
     positive: "promptPositiveOutput",
     captions: "promptCaptionsOutput",
-    combined: "promptCombinedOutput",
 };
 const PROMPT_RULE_DISPLAY = {
     "自然语言": "Natural language",

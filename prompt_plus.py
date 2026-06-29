@@ -613,9 +613,9 @@ class NO8DBatchPromptPlus:
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("captions", "combined")
-    OUTPUT_IS_LIST = (True, False)
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("captions",)
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "run"
     CATEGORY = "NO8D-control"
 
@@ -649,7 +649,7 @@ class NO8DBatchPromptPlus:
     def run(self, images, prompt_rules, style_preset="专业摄影", length_preset="标准", output_language="英文", seed=0, extra_rules=""):
         encoded = _images_to_data_urls(images)
         if not encoded:
-            return ([], "")
+            return ([],)
 
         service, model_cfg = prompt_config_manager.current_service()
         api_base_url = service.get("base_url", "")
@@ -692,8 +692,7 @@ class NO8DBatchPromptPlus:
                     self._cache.pop(next(iter(self._cache)))
             captions.append(result)
 
-        combined = "\n\n".join(f"[{index + 1:03d}]\n{caption}" for index, caption in enumerate(captions))
-        return (captions, combined)
+        return (captions,)
 
 
 class NO8DPromptView:
