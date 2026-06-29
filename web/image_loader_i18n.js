@@ -117,12 +117,19 @@ function selectedRefs(node) {
         .filter(Boolean);
 }
 
+function totalSizeText(refs) {
+    const total = refs.reduce((sum, ref) => sum + (Number(ref?.size) || 0), 0);
+    return total ? `${(total / 1024 / 1024).toFixed(2)} MB` : "";
+}
+
 function setOutputRefs(node, refs) {
     ensureInternalWidgets(node);
     const widget = outputWidget(node);
     if (!widget) return;
     widget.value = JSON.stringify(refs);
     widget.callback?.(widget.value);
+    node.properties = node.properties || {};
+    node.properties.no8d_image_loader_output_keys = refs.map(imageKey);
     renderLoader(node);
     node.graph?.change?.();
     node.graph?.setDirtyCanvas?.(true, true);
@@ -399,7 +406,7 @@ function makeUi(node) {
     sizeRange.type = "range";
     sizeRange.min = "90";
     sizeRange.max = "180";
-    sizeRange.step = "4";
+    sizeRange.step = "1";
     sizeRange.value = String(thumbSize(node));
     sizeRange.style.cssText = "flex:1; min-width:120px;";
     let resizeTimer = null;
@@ -454,17 +461,6 @@ function makeUi(node) {
         "z-index:2",
     ].join(";");
     preview.appendChild(selectionBox);
-
-    const details = document.createElement("div");
-    details.style.cssText = [
-        "min-height:18px",
-        "color:#9ca3af",
-        "font-size:12px",
-        "line-height:16px",
-        "overflow:hidden",
-        "white-space:nowrap",
-        "text-overflow:ellipsis",
-    ].join(";");
 
     let boxStart = null;
     preview.addEventListener("pointerdown", (event) => {
@@ -587,8 +583,8 @@ function makeUi(node) {
         }
     });
 
-    root.append(row, sizeRow, details, preview);
-    node._no8dImageLoaderEls = { root, load, status, sizeLabel, sizeRange, details, preview, selectionBox };
+    root.append(row, sizeRow, preview);
+    node._no8dImageLoaderEls = { root, load, status, sizeLabel, sizeRange, preview, selectionBox };
     return root;
 }
 
@@ -607,17 +603,17 @@ function renderLoader(node) {
         els.sizeRange.value = String(size);
     }
     const outputText = outputRefs.length ? `, ${t("imageLoaderOutputSingle")}` : "";
-    els.status.textContent = refs.length
-        ? `${refs.length} ${t("imageLoaderSelected")}, ${selected.size} ${t("imageLoaderSelectedCount")}${outputText}`
-        : t("imageLoaderEmpty");
     const selectedInfo = selectedRefs(node);
+    let selectedDetail = "";
     if (selectedInfo.length === 1) {
-        els.details.textContent = formatImageDetails(selectedInfo[0]);
+        selectedDetail = `, ${formatImageDetails(selectedInfo[0])}`;
     } else if (selectedInfo.length > 1) {
-        els.details.textContent = `${selectedInfo.length} ${t("imageLoaderSelectedCount")}`;
-    } else {
-        els.details.textContent = "";
+        const total = totalSizeText(selectedInfo);
+        selectedDetail = total ? `, ${total}` : "";
     }
+    els.status.textContent = refs.length
+        ? `${refs.length} ${t("imageLoaderSelected")}, ${selected.size} ${t("imageLoaderSelectedCount")}${selectedDetail}${outputText}`
+        : t("imageLoaderEmpty");
     els.preview.replaceChildren();
     if (els.selectionBox) els.preview.appendChild(els.selectionBox);
     els.preview.style.alignItems = "flex-start";
