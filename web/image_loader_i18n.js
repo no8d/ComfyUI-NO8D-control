@@ -12,6 +12,7 @@ const SLOT_LABELS = {
 };
 const LOADER_MIN_WIDTH = 360;
 const LOADER_MIN_HEIGHT = 180;
+const DRAG_MIME = "application/x-no8d-image-loader-index";
 
 let activeLocale = "";
 let renderSeq = 0;
@@ -62,6 +63,7 @@ function ensureInternalWidgets(node) {
         }
         if (!widget) continue;
         if (widget.value == null || widget.value === "") widget.value = "[]";
+        widget.serialize = true;
     }
     hideInternalWidgets(node);
 }
@@ -103,6 +105,23 @@ function setRefs(node, refs) {
     if (!widget) return;
     widget.value = JSON.stringify(refs);
     widget.callback?.(widget.value);
+    renderLoader(node);
+    node.graph?.change?.();
+    node.graph?.setDirtyCanvas?.(true, true);
+    app?.canvas?.setDirty?.(true, true);
+}
+
+function setImageAndOutputRefs(node, imageRefs, outputRefs = []) {
+    ensureInternalWidgets(node);
+    const image = imageWidget(node);
+    const output = outputWidget(node);
+    if (!image || !output) return;
+    image.value = JSON.stringify(imageRefs);
+    output.value = JSON.stringify(outputRefs);
+    image.callback?.(image.value);
+    output.callback?.(output.value);
+    node.properties = node.properties || {};
+    node.properties.no8d_image_loader_output_keys = outputRefs.map(imageKey);
     renderLoader(node);
     node.graph?.change?.();
     node.graph?.setDirtyCanvas?.(true, true);
@@ -156,14 +175,12 @@ function removeSelected(node) {
     const outputKeys = new Set(parseOutputRefs(node).map(imageKey));
     const nextOutput = next.filter((ref) => outputKeys.has(imageKey(ref)));
     node._no8dImageLoaderSelected = new Set();
-    setRefs(node, next);
-    setOutputRefs(node, nextOutput);
+    setImageAndOutputRefs(node, next, nextOutput);
 }
 
 function clearImages(node) {
     node._no8dImageLoaderSelected = new Set();
-    setOutputRefs(node, []);
-    setRefs(node, []);
+    setImageAndOutputRefs(node, [], []);
 }
 
 function clearStaleSlots(node) {
@@ -231,6 +248,62 @@ function formatImageDetails(ref) {
     return parts.filter(Boolean).join("  |  ");
 }
 
+function reorderRefs(node, fromIndex, toIndex) {
+    const refs = parseRefs(node);
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= refs.length || toIndex >= refs.length) return;
+    const [moved] = refs.splice(fromIndex, 1);
+    refs.splice(toIndex, 0, moved);
+    const selected = new Set();
+    selected.add(toIndex);
+    node._no8dImageLoaderSelected = selected;
+    node._no8dImageLoaderAnchor = toIndex;
+    setImageAndOutputRefs(node, refs, parseOutputRefs(node));
+}
+
+function uploadImages(node, files, append = false) {
+    const els = node._no8dImageLoaderEls;
+    const status = els?.status;
+    const load = els?.load;
+    const add = els?.add;
+    const run = async () => {
+        if (!files.length) return;
+        if (status) status.textContent = t("imageLoaderUploading");
+        if (load) load.disabled = true;
+        if (add) add.disabled = true;
+        try {
+            const refs = [];
+            for (const file of files) {
+                const meta = await imageFileMeta(file);
+                const body = new FormData();
+                body.append("image", file);
+                body.append("type", "input");
+                body.append("overwrite", "false");
+                const response = await api.fetchApi("/upload/image", { method: "POST", body });
+                if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                const data = await response.json();
+                refs.push({
+                    name: data.name,
+                    subfolder: data.subfolder || "",
+                    type: data.type || "input",
+                    width: meta.width || 0,
+                    height: meta.height || 0,
+                    size: meta.size || 0,
+                });
+            }
+            const nextRefs = append ? [...parseRefs(node), ...refs] : refs;
+            node._no8dImageLoaderSelected = new Set();
+            setImageAndOutputRefs(node, nextRefs, []);
+        } catch (error) {
+            console.error("[NO8D-Load-images]", error);
+            if (status) status.textContent = t("imageLoaderUploadFailed");
+        } finally {
+            if (load) load.disabled = false;
+            if (add) add.disabled = false;
+        }
+    };
+    return run();
+}
+
 function makeThumbItem(node, ref, index, size, selected) {
     const isSelected = selected.has(index);
     const item = document.createElement("div");
@@ -245,13 +318,36 @@ function makeThumbItem(node, ref, index, size, selected) {
         "user-select:none",
     ].join(";");
     item.dataset.index = String(index);
+    item.draggable = true;
     item.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
         node._no8dImageLoaderEls?.preview?.focus?.({ preventScroll: true });
     });
+    item.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData(DRAG_MIME, String(index));
+        event.dataTransfer.effectAllowed = "move";
+    });
+    item.addEventListener("dragover", (event) => {
+        if (!Array.from(event.dataTransfer?.types || []).includes(DRAG_MIME)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+    });
+    item.addEventListener("drop", (event) => {
+        const raw = event.dataTransfer?.getData(DRAG_MIME);
+        if (raw == null || raw === "") return;
+        event.preventDefault();
+        event.stopPropagation();
+        reorderRefs(node, Number(raw), index);
+    });
     item.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (event.detail >= 2) {
+            node._no8dImageLoaderAnchor = index;
+            node._no8dImageLoaderSelected = new Set([index]);
+            setImageAndOutputRefs(node, parseRefs(node), [ref]);
+            return;
+        }
         const refs = parseRefs(node);
         const current = selectedSet(node);
         let next = new Set();
@@ -277,7 +373,7 @@ function makeThumbItem(node, ref, index, size, selected) {
         event.stopPropagation();
         node._no8dImageLoaderAnchor = index;
         node._no8dImageLoaderSelected = new Set([index]);
-        setOutputRefs(node, [ref]);
+        setImageAndOutputRefs(node, parseRefs(node), [ref]);
     });
 
     const img = document.createElement("img");
@@ -387,17 +483,22 @@ function makeUi(node) {
     input.multiple = true;
     input.style.display = "none";
 
+    const addInput = document.createElement("input");
+    addInput.type = "file";
+    addInput.accept = input.accept;
+    addInput.multiple = true;
+    addInput.style.display = "none";
+
     const load = makeButton(t("imageLoaderLoad"), () => input.click());
     load.style.borderColor = "#3b82f6";
     load.style.color = "#bfdbfe";
 
+    const add = makeButton(t("imageLoaderAdd"), () => addInput.click());
+    add.style.borderColor = "#3b82f6";
+    add.style.color = "#bfdbfe";
+
     const status = document.createElement("div");
     status.style.cssText = "flex:1; min-width:0; color:#9ca3af; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;";
-
-    row.append(load, status, input);
-
-    const sizeRow = document.createElement("div");
-    sizeRow.style.cssText = "display:flex; align-items:center; gap:8px;";
 
     const sizeLabel = document.createElement("div");
     sizeLabel.style.cssText = "color:#cbd5e1; white-space:nowrap; font-weight:600;";
@@ -408,7 +509,7 @@ function makeUi(node) {
     sizeRange.max = "180";
     sizeRange.step = "1";
     sizeRange.value = String(thumbSize(node));
-    sizeRange.style.cssText = "flex:1; min-width:120px;";
+    sizeRange.style.cssText = "width:160px; min-width:120px;";
     let resizeTimer = null;
     sizeRange.addEventListener("pointerdown", (event) => event.stopPropagation());
     sizeRange.addEventListener("input", () => {
@@ -424,7 +525,7 @@ function makeUi(node) {
         clearTimeout(resizeTimer);
         renderLoader(node);
     });
-    sizeRow.append(sizeLabel, sizeRange);
+    row.append(load, add, sizeLabel, sizeRange, status, input, addInput);
 
     const preview = document.createElement("div");
     preview.className = "no8d-image-loader-preview";
@@ -505,6 +606,7 @@ function makeUi(node) {
         event.preventDefault();
         const boxRect = selectionBox.getBoundingClientRect();
         const next = new Set();
+        const current = selectedSet(node);
         for (const item of preview.querySelectorAll("[data-index]")) {
             const itemRect = item.getBoundingClientRect();
             const overlaps = itemRect.left <= boxRect.right
@@ -513,9 +615,13 @@ function makeUi(node) {
                 && itemRect.bottom >= boxRect.top;
             if (overlaps) next.add(Number(item.dataset.index));
         }
+        const finalSelection = (event.ctrlKey || event.metaKey) ? new Set(current) : next;
+        if (event.ctrlKey || event.metaKey) {
+            for (const index of next) finalSelection.delete(index);
+        }
         selectionBox.style.display = "none";
         boxStart = null;
-        syncSelection(node, next);
+        syncSelection(node, finalSelection);
     };
     preview.addEventListener("pointerup", finishBoxSelect);
     preview.addEventListener("pointercancel", finishBoxSelect);
@@ -548,43 +654,28 @@ function makeUi(node) {
 
     input.addEventListener("change", async () => {
         const files = Array.from(input.files || []);
-        if (!files.length) return;
-        status.textContent = t("imageLoaderUploading");
-        load.disabled = true;
-        try {
-            const refs = [];
-            for (const file of files) {
-                const meta = await imageFileMeta(file);
-                const body = new FormData();
-                body.append("image", file);
-                body.append("type", "input");
-                body.append("overwrite", "false");
-                const response = await api.fetchApi("/upload/image", { method: "POST", body });
-                if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-                const data = await response.json();
-                refs.push({
-                    name: data.name,
-                    subfolder: data.subfolder || "",
-                    type: data.type || "input",
-                    width: meta.width || 0,
-                    height: meta.height || 0,
-                    size: meta.size || 0,
-                });
-            }
-            node._no8dImageLoaderSelected = new Set();
-            setOutputRefs(node, []);
-            setRefs(node, refs);
-        } catch (error) {
-            console.error("[NO8D-Load-images]", error);
-            status.textContent = t("imageLoaderUploadFailed");
-        } finally {
-            load.disabled = false;
-            input.value = "";
-        }
+        await uploadImages(node, files, false);
+        input.value = "";
+    });
+    addInput.addEventListener("change", async () => {
+        const files = Array.from(addInput.files || []);
+        await uploadImages(node, files, true);
+        addInput.value = "";
     });
 
-    root.append(row, sizeRow, preview);
-    node._no8dImageLoaderEls = { root, load, status, sizeLabel, sizeRange, preview, selectionBox };
+    const details = document.createElement("div");
+    details.style.cssText = [
+        "min-height:18px",
+        "color:#9ca3af",
+        "font-size:12px",
+        "line-height:16px",
+        "overflow:hidden",
+        "white-space:nowrap",
+        "text-overflow:ellipsis",
+    ].join(";");
+
+    root.append(row, preview, details);
+    node._no8dImageLoaderEls = { root, load, add, status, sizeLabel, sizeRange, preview, details, selectionBox };
     return root;
 }
 
@@ -598,22 +689,24 @@ function renderLoader(node) {
     const outputRefs = parseOutputRefs(node);
     const size = thumbSize(node);
     els.load.textContent = t("imageLoaderLoad");
+    els.add.textContent = t("imageLoaderAdd");
     els.sizeLabel.textContent = `${t("imageLoaderThumbSize")}: ${Math.round(size)}px`;
     if (Number(els.sizeRange.value) !== size) {
         els.sizeRange.value = String(size);
     }
     const outputText = outputRefs.length ? `, ${t("imageLoaderOutputSingle")}` : "";
     const selectedInfo = selectedRefs(node);
-    let selectedDetail = "";
+    let detailText = "";
     if (selectedInfo.length === 1) {
-        selectedDetail = `, ${formatImageDetails(selectedInfo[0])}`;
+        detailText = formatImageDetails(selectedInfo[0]);
     } else if (selectedInfo.length > 1) {
         const total = totalSizeText(selectedInfo);
-        selectedDetail = total ? `, ${total}` : "";
+        detailText = total ? `${selectedInfo.length} ${t("imageLoaderSelectedCount")} | ${total}` : `${selectedInfo.length} ${t("imageLoaderSelectedCount")}`;
     }
     els.status.textContent = refs.length
-        ? `${refs.length} ${t("imageLoaderSelected")}, ${selected.size} ${t("imageLoaderSelectedCount")}${selectedDetail}${outputText}`
+        ? `${refs.length} ${t("imageLoaderSelected")}, ${selected.size} ${t("imageLoaderSelectedCount")}${outputText}`
         : t("imageLoaderEmpty");
+    els.details.textContent = detailText;
     els.preview.replaceChildren();
     if (els.selectionBox) els.preview.appendChild(els.selectionBox);
     els.preview.style.alignItems = "flex-start";
@@ -641,7 +734,7 @@ function renderLoader(node) {
 function hideInternalWidgets(node) {
     for (const widget of node.widgets || []) {
         if (!HIDDEN_WIDGETS.has(widget.name)) continue;
-        widget.type = "hidden";
+        widget.type = widget.type === "hidden" ? "text" : widget.type;
         widget.computeSize = () => [0, -4];
         widget.draw = () => {};
     }
