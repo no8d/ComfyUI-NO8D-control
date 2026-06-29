@@ -497,9 +497,6 @@ function makeUi(node) {
     add.style.borderColor = "#3b82f6";
     add.style.color = "#bfdbfe";
 
-    const status = document.createElement("div");
-    status.style.cssText = "flex:1; min-width:0; color:#9ca3af; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;";
-
     const sizeLabel = document.createElement("div");
     sizeLabel.style.cssText = "color:#cbd5e1; white-space:nowrap; font-weight:600;";
 
@@ -525,7 +522,7 @@ function makeUi(node) {
         clearTimeout(resizeTimer);
         renderLoader(node);
     });
-    row.append(load, add, sizeLabel, sizeRange, status, input, addInput);
+    row.append(load, add, sizeLabel, sizeRange, input, addInput);
 
     const preview = document.createElement("div");
     preview.className = "no8d-image-loader-preview";
@@ -663,18 +660,35 @@ function makeUi(node) {
         addInput.value = "";
     });
 
-    const details = document.createElement("div");
-    details.style.cssText = [
-        "min-height:18px",
+    const footer = document.createElement("div");
+    footer.style.cssText = [
+        "display:flex",
+        "flex-direction:column",
+        "gap:2px",
+        "min-height:36px",
         "color:#9ca3af",
         "font-size:12px",
         "line-height:16px",
+        "overflow:hidden",
+    ].join(";");
+
+    const status = document.createElement("div");
+    status.style.cssText = [
         "overflow:hidden",
         "white-space:nowrap",
         "text-overflow:ellipsis",
     ].join(";");
 
-    root.append(row, preview, details);
+    const details = document.createElement("div");
+    details.style.cssText = [
+        "min-height:18px",
+        "overflow:hidden",
+        "white-space:nowrap",
+        "text-overflow:ellipsis",
+    ].join(";");
+    footer.append(status, details);
+
+    root.append(row, preview, footer);
     node._no8dImageLoaderEls = { root, load, add, status, sizeLabel, sizeRange, preview, details, selectionBox };
     return root;
 }
