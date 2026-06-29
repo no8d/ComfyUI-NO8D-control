@@ -879,8 +879,6 @@ function installLoaderUi(node) {
         wrapper.classList.add("no8d-image-loader-widget");
         wrapper.style.overflow = "hidden";
         wrapper.style.boxSizing = "border-box";
-        wrapper.style.width = "100%";
-        wrapper.style.maxWidth = "100%";
         wrapper.style.minHeight = "0";
         wrapper.style.display = "flex";
         wrapper.style.flexDirection = "column";
