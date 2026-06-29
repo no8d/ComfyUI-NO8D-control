@@ -22,8 +22,22 @@ function nodeClass(node) {
     return node?.comfyClass || node?.type || "";
 }
 
+function previewMode(node) {
+    const value = node.properties?.no8d_image_loader_mode;
+    return value === "grid" ? "grid" : "strip";
+}
+
 function imageWidget(node) {
     return (node.widgets || []).find((widget) => widget.name === "image_files");
+}
+
+function normalizeWidgetValues(node) {
+    for (const widget of node.widgets || []) {
+        if ((widget.name === "start_index" || widget.name === "max_images") && !Number.isFinite(Number(widget.value))) {
+            widget.value = 0;
+            widget.callback?.(widget.value);
+        }
+    }
 }
 
 function parseRefs(node) {
@@ -81,6 +95,17 @@ function makeButton(label, onClick) {
     return button;
 }
 
+function makeModeButton(node, mode) {
+    const button = makeButton("", () => {
+        node.properties = node.properties || {};
+        node.properties.no8d_image_loader_mode = mode;
+        renderLoader(node);
+    });
+    button.style.padding = "0 10px";
+    button.dataset.mode = mode;
+    return button;
+}
+
 function makeUi(node) {
     const root = document.createElement("div");
     root.className = "no8d-image-loader";
@@ -96,7 +121,7 @@ function makeUi(node) {
     ].join(";");
 
     const row = document.createElement("div");
-    row.style.cssText = "display:flex; align-items:center; gap:8px;";
+    row.style.cssText = "display:flex; align-items:center; gap:8px; flex-wrap:wrap;";
 
     const input = document.createElement("input");
     input.type = "file";
@@ -110,23 +135,27 @@ function makeUi(node) {
 
     const clear = makeButton(t("imageLoaderClear"), () => setRefs(node, []));
 
+    const stripMode = makeModeButton(node, "strip");
+    const gridMode = makeModeButton(node, "grid");
+
     const status = document.createElement("div");
     status.style.cssText = "flex:1; min-width:0; color:#9ca3af; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;";
 
-    row.append(load, clear, status, input);
+    row.append(load, clear, stripMode, gridMode, status, input);
 
     const preview = document.createElement("div");
     preview.style.cssText = [
         "display:flex",
         "gap:6px",
-        "align-items:center",
-        "min-height:72px",
+        "align-content:flex-start",
+        "min-height:96px",
+        "height:100%",
         "padding:8px",
         "border:1px solid #333",
         "border-radius:6px",
         "background:#111",
         "overflow-x:auto",
-        "overflow-y:hidden",
+        "overflow-y:auto",
         "box-sizing:border-box",
     ].join(";");
 
@@ -162,7 +191,7 @@ function makeUi(node) {
     });
 
     root.append(row, preview);
-    node._no8dImageLoaderEls = { root, load, clear, status, preview };
+    node._no8dImageLoaderEls = { root, load, clear, stripMode, gridMode, status, preview };
     return root;
 }
 
@@ -170,10 +199,21 @@ function renderLoader(node) {
     const els = node._no8dImageLoaderEls;
     if (!els) return;
     const refs = parseRefs(node);
+    const mode = previewMode(node);
     els.load.textContent = t("imageLoaderLoad");
     els.clear.textContent = t("imageLoaderClear");
+    els.stripMode.textContent = t("imageLoaderStripMode");
+    els.gridMode.textContent = t("imageLoaderGridMode");
+    for (const button of [els.stripMode, els.gridMode]) {
+        const active = button.dataset.mode === mode;
+        button.style.borderColor = active ? "#3b82f6" : "#4b5563";
+        button.style.color = active ? "#bfdbfe" : "#f3f4f6";
+        button.style.background = active ? "#1e3a5f" : "#2b2b2b";
+    }
     els.status.textContent = refs.length ? `${refs.length} ${t("imageLoaderSelected")}` : t("imageLoaderEmpty");
     els.preview.replaceChildren();
+    els.preview.style.flexWrap = mode === "strip" ? "nowrap" : "wrap";
+    els.preview.style.alignItems = mode === "strip" ? "center" : "flex-start";
     if (!refs.length) {
         const empty = document.createElement("div");
         empty.textContent = t("imageLoaderEmpty");
@@ -182,19 +222,46 @@ function renderLoader(node) {
         return;
     }
     for (const ref of refs) {
+        const item = document.createElement("div");
+        item.style.cssText = [
+            "display:flex",
+            "flex-direction:column",
+            "gap:4px",
+            "align-items:center",
+            "flex:0 0 auto",
+            mode === "grid" ? "width:92px" : "width:76px",
+        ].join(";");
+
         const img = document.createElement("img");
         img.src = viewUrl(ref);
         img.title = ref.name || "";
         img.style.cssText = [
-            "width:64px",
-            "height:64px",
+            mode === "grid" ? "width:86px" : "width:70px",
+            mode === "grid" ? "height:86px" : "height:70px",
             "object-fit:cover",
             "border:1px solid #3b82f6",
             "border-radius:4px",
             "background:#050505",
             "flex:0 0 auto",
         ].join(";");
-        els.preview.appendChild(img);
+        item.appendChild(img);
+        if (mode === "grid") {
+            const name = document.createElement("div");
+            name.textContent = ref.name || "";
+            name.title = ref.name || "";
+            name.style.cssText = [
+                "width:100%",
+                "font-size:10px",
+                "line-height:12px",
+                "color:#9ca3af",
+                "overflow:hidden",
+                "white-space:nowrap",
+                "text-overflow:ellipsis",
+                "text-align:center",
+            ].join(";");
+            item.appendChild(name);
+        }
+        els.preview.appendChild(item);
     }
 }
 
@@ -219,6 +286,7 @@ function applySlotLabels(slots) {
 
 function applyLabels(node) {
     if (nodeClass(node) !== NODE_CLASS) return;
+    normalizeWidgetValues(node);
     node.title = t("imageLoaderTitle");
     for (const widget of node.widgets || []) {
         const key = WIDGET_LABELS[widget.name];
@@ -255,7 +323,10 @@ function installLoaderUi(node) {
         hideOnZoom: false,
     });
     widget.serialize = false;
-    widget.computeSize = (width) => [Math.max(width || 300, 300), 120];
+    widget.computeSize = (width) => [
+        Math.max(width || 300, 300),
+        Math.max((node.size?.[1] || 260) - 120, 120),
+    ];
     node._no8dImageLoaderWidget = widget;
     renderLoader(node);
 }
