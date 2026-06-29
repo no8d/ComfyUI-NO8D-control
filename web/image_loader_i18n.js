@@ -10,7 +10,7 @@ const WIDGET_LABELS = {
 const SLOT_LABELS = {
     images: "imageLoaderImages",
 };
-const LOADER_MIN_WIDTH = 360;
+const LOADER_MIN_WIDTH = 420;
 const LOADER_MIN_HEIGHT = 180;
 const DRAG_MIME = "application/x-no8d-image-loader-index";
 
@@ -305,16 +305,14 @@ function reorderRefs(node, fromIndex, toIndex) {
     setImageAndOutputRefs(node, refs, []);
 }
 
-function uploadImages(node, files, append = false) {
+function uploadImages(node, files) {
     const els = node._no8dImageLoaderEls;
     const status = els?.status;
     const load = els?.load;
-    const add = els?.add;
     const run = async () => {
         if (!files.length) return;
         if (status) status.textContent = t("imageLoaderUploading");
         if (load) load.disabled = true;
-        if (add) add.disabled = true;
         try {
             const refs = [];
             for (const file of files) {
@@ -335,15 +333,13 @@ function uploadImages(node, files, append = false) {
                     size: meta.size || 0,
                 });
             }
-            const nextRefs = append ? [...parseRefs(node), ...refs] : refs;
             node._no8dImageLoaderSelected = new Set();
-            setImageAndOutputRefs(node, nextRefs, []);
+            setImageAndOutputRefs(node, refs, []);
         } catch (error) {
             console.error("[NO8D-Load-images]", error);
             if (status) status.textContent = t("imageLoaderUploadFailed");
         } finally {
             if (load) load.disabled = false;
-            if (add) add.disabled = false;
         }
     };
     return run();
@@ -472,19 +468,34 @@ function makeThumbItem(node, ref, index, size, selected) {
     return item;
 }
 
-function makeButton(label, onClick) {
+function setThumbSize(node, value) {
+    node.properties = node.properties || {};
+    node.properties.no8d_image_loader_thumb_size = Math.max(80, Math.min(200, Number(value) || 140));
+    renderLoader(node);
+    node.graph?.setDirtyCanvas?.(true, true);
+    app?.canvas?.setDirty?.(true, true);
+}
+
+function makeIconButton(label, icon, onClick) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = label;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.innerHTML = icon;
     button.style.cssText = [
-        "height:30px",
-        "padding:0 14px",
+        "width:36px",
+        "height:32px",
+        "padding:0",
         "border:1px solid #4b5563",
         "border-radius:6px",
         "background:#2b2b2b",
-        "color:#f3f4f6",
-        "font-weight:600",
+        "color:#bfdbfe",
         "cursor:pointer",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "flex:0 0 36px",
+        "box-sizing:border-box",
     ].join(";");
     button.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
@@ -516,7 +527,15 @@ function makeUi(node) {
     ].join(";");
 
     const row = document.createElement("div");
-    row.style.cssText = "display:flex; align-items:center; gap:8px; flex-wrap:wrap;";
+    row.style.cssText = [
+        "display:grid",
+        "grid-template-columns:36px minmax(0, 1fr) 36px",
+        "align-items:center",
+        "gap:10px",
+        "width:100%",
+        "min-width:0",
+        "box-sizing:border-box",
+    ].join(";");
 
     const input = document.createElement("input");
     input.type = "file";
@@ -524,22 +543,17 @@ function makeUi(node) {
     input.multiple = true;
     input.style.display = "none";
 
-    const addInput = document.createElement("input");
-    addInput.type = "file";
-    addInput.accept = input.accept;
-    addInput.multiple = true;
-    addInput.style.display = "none";
+    const folderIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/><path d="M3 9h18"/></svg>';
+    const maxIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5"/><path d="M3 3l7 7"/><path d="M16 3h5v5"/><path d="M21 3l-7 7"/><path d="M8 21H3v-5"/><path d="M3 21l7-7"/><path d="M16 21h5v-5"/><path d="M21 21l-7-7"/></svg>';
 
-    const load = makeButton(t("imageLoaderLoad"), () => input.click());
+    const load = makeIconButton(t("imageLoaderLoad"), folderIcon, () => input.click());
     load.style.borderColor = "#3b82f6";
-    load.style.color = "#bfdbfe";
 
-    const add = makeButton(t("imageLoaderAdd"), () => addInput.click());
-    add.style.borderColor = "#3b82f6";
-    add.style.color = "#bfdbfe";
+    const maxSize = makeIconButton(t("imageLoaderMaxThumbSize"), maxIcon, () => setThumbSize(node, 200));
+    maxSize.style.borderColor = "#3b82f6";
 
     const sizeLabel = document.createElement("div");
-    sizeLabel.style.cssText = "color:#cbd5e1; white-space:nowrap; font-weight:600;";
+    sizeLabel.style.cssText = "color:#cbd5e1; white-space:nowrap; font-weight:600; flex:0 0 auto;";
 
     const sizeRange = document.createElement("input");
     sizeRange.type = "range";
@@ -547,7 +561,7 @@ function makeUi(node) {
     sizeRange.max = "200";
     sizeRange.step = "5";
     sizeRange.value = String(thumbSize(node));
-    sizeRange.style.cssText = "flex:1 1 160px; min-width:120px;";
+    sizeRange.style.cssText = "flex:1 1 auto; min-width:0; width:100%;";
     let resizeTimer = null;
     sizeRange.addEventListener("pointerdown", (event) => event.stopPropagation());
     sizeRange.addEventListener("input", () => {
@@ -563,7 +577,18 @@ function makeUi(node) {
         clearTimeout(resizeTimer);
         renderLoader(node);
     });
-    row.append(load, add, sizeLabel, sizeRange, input, addInput);
+
+    const sizeControl = document.createElement("div");
+    sizeControl.style.cssText = [
+        "display:flex",
+        "align-items:center",
+        "gap:10px",
+        "min-width:0",
+        "width:100%",
+        "box-sizing:border-box",
+    ].join(";");
+    sizeControl.append(sizeLabel, sizeRange);
+    row.append(load, sizeControl, maxSize, input);
 
     const preview = document.createElement("div");
     preview.className = "no8d-image-loader-preview";
@@ -692,13 +717,8 @@ function makeUi(node) {
 
     input.addEventListener("change", async () => {
         const files = Array.from(input.files || []);
-        await uploadImages(node, files, false);
+        await uploadImages(node, files);
         input.value = "";
-    });
-    addInput.addEventListener("change", async () => {
-        const files = Array.from(addInput.files || []);
-        await uploadImages(node, files, true);
-        addInput.value = "";
     });
 
     const footer = document.createElement("div");
@@ -730,7 +750,7 @@ function makeUi(node) {
     footer.append(status, details);
 
     root.append(row, preview, footer);
-    node._no8dImageLoaderEls = { root, load, add, status, sizeLabel, sizeRange, preview, details, selectionBox };
+    node._no8dImageLoaderEls = { root, load, maxSize, status, sizeLabel, sizeRange, preview, details, selectionBox };
     return root;
 }
 
@@ -743,8 +763,10 @@ function renderLoader(node) {
     const selected = selectedSet(node);
     clearStoredOutputRefs(node);
     const size = thumbSize(node);
-    els.load.textContent = t("imageLoaderLoad");
-    els.add.textContent = t("imageLoaderAdd");
+    els.load.title = t("imageLoaderLoad");
+    els.load.setAttribute("aria-label", t("imageLoaderLoad"));
+    els.maxSize.title = t("imageLoaderMaxThumbSize");
+    els.maxSize.setAttribute("aria-label", t("imageLoaderMaxThumbSize"));
     els.sizeLabel.textContent = t("imageLoaderThumbSize");
     if (Number(els.sizeRange.value) !== size) {
         els.sizeRange.value = String(size);
