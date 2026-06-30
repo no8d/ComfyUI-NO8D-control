@@ -189,7 +189,7 @@ default/no8d-control/config/prompt_api.json
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/NO8D/ComfyUI-NO8D-control.git
+git clone https://github.com/no8d/ComfyUI-NO8D-controls.git
 ```
 
 安装后重启 ComfyUI，并强制刷新浏览器页面。
@@ -199,7 +199,7 @@ git clone https://github.com/NO8D/ComfyUI-NO8D-control.git
 
 NO8D 不是专业软件开发者。本节点组是在 Codex 的帮助下，通过实际测试、反复调试和真实 ComfyUI 工作流中的多轮迭代完成的。
 
-欢迎通过 [GitHub Issues](https://github.com/NO8D/ComfyUI-NO8D-control/issues) 提交可复现的问题和功能建议。参与代码贡献前，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+欢迎通过 [GitHub Issues](https://github.com/no8d/ComfyUI-NO8D-controls/issues) 提交可复现的问题和功能建议。参与代码贡献前，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 你也可以通过 [NO8D Patreon 社区](https://patreon.com/no8d?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink) 支持 NO8D，并交流 LoRA 控制、Slider LoRA 和局部重绘工作流。
 

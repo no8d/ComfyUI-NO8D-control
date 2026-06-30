@@ -1,0 +1,20 @@
+[project]
+name = "no8d-control"
+description = "NO8D custom nodes for LoRA stacking, inpainting, A/B preview, prompt captioning, image loading, and dataset saving in ComfyUI."
+version = "1.0.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Repository = "https://github.com/no8d/ComfyUI-NO8D-controls"
+Issues = "https://github.com/no8d/ComfyUI-NO8D-controls/issues"
+
+[tool.comfy]
+PublisherId = "no8d"
+DisplayName = "NO8D-control"
+Icon = "https://raw.githubusercontent.com/no8d/ComfyUI-NO8D-controls/main/docs/images/wechat.png"

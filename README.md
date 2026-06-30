@@ -1,7 +1,7 @@
 # ComfyUI-NO8D-control
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![GitHub](https://img.shields.io/badge/GitHub-NO8D%2FComfyUI--NO8D--control-181717?logo=github)](https://github.com/NO8D/ComfyUI-NO8D-control)
+[![GitHub](https://img.shields.io/badge/GitHub-NO8D%2FComfyUI--NO8D--controls-181717?logo=github)](https://github.com/no8d/ComfyUI-NO8D-controls)
 
 English | [简体中文](./README.zh-CN.md)
 
@@ -36,7 +36,7 @@ Clone this repository into your ComfyUI `custom_nodes` directory:
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/NO8D/ComfyUI-NO8D-control.git
+git clone https://github.com/no8d/ComfyUI-NO8D-controls.git
 ```
 
 Restart ComfyUI after installation, then hard refresh the browser page.
@@ -248,7 +248,7 @@ The extension keeps custom frontend behavior narrow and relies on standard Comfy
 
 NO8D is not a professional software developer. This node pack was built with the help of Codex through practical testing, debugging, and iteration inside real ComfyUI workflows.
 
-Please use [GitHub Issues](https://github.com/NO8D/ComfyUI-NO8D-control/issues) for reproducible bugs and feature requests. Before contributing code, please read [CONTRIBUTING.md](./CONTRIBUTING.md).
+Please use [GitHub Issues](https://github.com/no8d/ComfyUI-NO8D-controls/issues) for reproducible bugs and feature requests. Before contributing code, please read [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 You can support NO8D and discuss LoRA control, Slider LoRA, and inpainting workflows through the [NO8D Patreon community](https://patreon.com/no8d?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink).
 
