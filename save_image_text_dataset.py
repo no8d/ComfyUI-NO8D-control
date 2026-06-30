@@ -1,4 +1,4 @@
-"""Save paired image/text datasets with source-name based filenames."""
+"""Save image/caption datasets with source-name based filenames."""
 
 from __future__ import annotations
 
@@ -108,13 +108,13 @@ def _source_stem(image: Any) -> str:
     return ""
 
 
-def _text_at(text: Any, index: int) -> str:
-    if isinstance(text, (list, tuple)):
-        if not text:
+def _caption_at(caption: Any, index: int) -> str:
+    if isinstance(caption, (list, tuple)):
+        if not caption:
             return ""
-        item = text[index] if index < len(text) else text[-1]
+        item = caption[index] if index < len(caption) else caption[-1]
         return str(item or "")
-    return str(text or "")
+    return str(caption or "")
 
 
 _VARIABLES = ("none", "original_name", "datetime", "size_class")
@@ -226,11 +226,13 @@ class NO8DSaveImageTextDataset:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "text": ("STRING", {"forceInput": True}),
                 "folder_path": ("STRING", {"default": ""}),
                 "name_parts_json": ("STRING", {"default": '[{"variable":"none","text":""}]', "multiline": False}),
                 "image_format": (_IMAGE_FORMATS, {"default": "png"}),
                 "quality": ("INT", {"default": 100, "min": 1, "max": 100}),
+            },
+            "optional": {
+                "caption": ("STRING", {"forceInput": True}),
             },
         }
 
@@ -242,11 +244,11 @@ class NO8DSaveImageTextDataset:
     def save(
         self,
         images,
-        text,
         folder_path="",
         name_parts_json='[{"variable":"none","text":""}]',
         image_format="png",
         quality=100,
+        caption=None,
     ):
         folder = _resolve_folder(folder_path)
         folder.mkdir(parents=True, exist_ok=True)
@@ -278,13 +280,15 @@ class NO8DSaveImageTextDataset:
                 base_name = _sanitize_filename(base_name, "image")
             image_path = folder / f"{base_name}.{image_format}"
             text_path = folder / f"{base_name}.txt"
+            has_caption = caption is not None
 
-            if image_path.exists() or text_path.exists():
+            if image_path.exists() or (has_caption and text_path.exists()):
                 image_path = _unique_path(image_path)
                 text_path = image_path.with_suffix(".txt")
 
             _save_image(image_path, pil_image, image_format, quality)
-            text_path.write_text(_text_at(text, batch_index).strip() + "\n", encoding="utf-8")
+            if has_caption:
+                text_path.write_text(_caption_at(caption, batch_index).strip() + "\n", encoding="utf-8")
             saved.append(str(image_path))
 
         return {"ui": {"saved": saved}, "result": ()}

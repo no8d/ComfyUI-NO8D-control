@@ -176,7 +176,7 @@ The node preserves source filename metadata so `NO8D save` can reuse original fi
 Inputs:
 
 - `images`: image batch input.
-- `text`: prompt/caption text input.
+- `caption`: optional caption input. If it is not connected, the node saves images only.
 
 Options:
 
