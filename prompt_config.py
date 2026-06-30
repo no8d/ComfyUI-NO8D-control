@@ -352,7 +352,7 @@ class PromptConfigManager:
         if service is None and services:
             service = services[0]
         if service is None:
-            raise ValueError("NO8D-Prompt-plus: no API service is configured")
+            raise ValueError("NO8D-Prompt: no API service is configured")
         models = service.get("models") or []
         model = next((item for item in models if item.get("is_default")), None)
         if model is None and models:

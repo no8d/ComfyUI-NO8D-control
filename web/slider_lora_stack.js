@@ -323,7 +323,7 @@ function render(node) {
         });
         row.appendChild(handle);
 
-        const toggle = makeButton(entry.enabled ? "ON" : "OFF", "临时启用/关闭此 LoRA", () => {
+        const toggle = makeButton(entry.enabled ? "ON" : "OFF", t("toggleLora"), () => {
             entry.enabled = !entry.enabled;
             writeStack(node);
             render(node);

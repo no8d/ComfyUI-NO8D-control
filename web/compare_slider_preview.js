@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { t } from "./no8d_i18n.js";
 
 const NODE_NAME = "NO8DABPreview";
 const MIN_WIDTH = 260;
@@ -168,6 +169,22 @@ function syncCompareFrame(node) {
     els.root.style.height = "100%";
 }
 
+function compareHistoryCollapsed(node) {
+    return !!node.properties?.no8d_ab_history_collapsed;
+}
+
+function syncHistoryCollapse(node) {
+    const els = node._no8dCompareEls;
+    if (!els?.historyWrap || !els.history || !els.historyToggle) return;
+    const collapsed = compareHistoryCollapsed(node);
+    els.historyWrap.style.flex = collapsed ? "0 0 30px" : "1 1 0";
+    els.historyWrap.style.minHeight = collapsed ? "30px" : "44px";
+    els.historyWrap.style.padding = collapsed ? "0 44px" : "12px 10px 8px 64px";
+    els.history.style.display = collapsed ? "none" : "flex";
+    els.historyToggle.textContent = collapsed ? "▴" : "▾";
+    els.historyToggle.title = collapsed ? t("expandHistory") : t("collapseHistory");
+}
+
 function renderHistory(node) {
     const els = node._no8dCompareEls;
     if (!els) return;
@@ -209,7 +226,8 @@ function renderHistory(node) {
         });
         els.history.appendChild(thumb);
     }
-    els.history.scrollLeft = els.history.scrollWidth;
+    syncHistoryCollapse(node);
+    if (!compareHistoryCollapsed(node)) els.history.scrollLeft = els.history.scrollWidth;
 }
 
 async function createCompareWidget(node) {
@@ -363,24 +381,58 @@ async function createCompareWidget(node) {
     ].join(";");
 
     const empty = document.createElement("div");
-    empty.textContent = "\u6ca1\u6709\u53ef\u4ee5\u5bf9\u6bd4\u7684\u56fe\u50cf";
+    empty.textContent = t("abNoComparableImage");
     empty.style.cssText = "color:#ddd; font-size:12px; text-align:center;";
+
+    const historyWrap = document.createElement("div");
+    historyWrap.style.cssText = [
+        "flex:1 1 0",
+        "min-height:44px",
+        "position:relative",
+        "padding:12px 10px 8px 64px",
+        "border-top:1px solid #222",
+        "background:#181818",
+        "box-sizing:border-box",
+        "overflow:hidden",
+    ].join(";");
+
+    const historyToggle = document.createElement("button");
+    historyToggle.classList.add("no8d-compare-control");
+    historyToggle.type = "button";
+    historyToggle.style.cssText = [
+        "position:absolute",
+        "left:10px",
+        "top:50%",
+        "transform:translateY(-50%)",
+        "width:34px",
+        "height:24px",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "border:1px solid #333",
+        "border-radius:4px",
+        "background:rgba(24,24,24,0.9)",
+        "color:#dbeafe",
+        "font-size:16px",
+        "line-height:1",
+        "cursor:pointer",
+        "pointer-events:auto",
+        "box-sizing:border-box",
+    ].join(";");
 
     const history = document.createElement("div");
     history.style.cssText = [
-        "flex:1 1 0",
-        "min-height:44px",
+        "width:100%",
+        "height:100%",
         "display:flex",
         "align-items:center",
         "justify-content:center",
         "gap:12px",
-        "padding:12px 10px 8px",
         "overflow-x:auto",
         "overflow-y:hidden",
-        "border-top:1px solid #222",
-        "background:#181818",
         "box-sizing:border-box",
     ].join(";");
+    historyWrap.append(historyToggle, history);
 
     afterClip.appendChild(after);
     stage.appendChild(before);
@@ -390,7 +442,7 @@ async function createCompareWidget(node) {
     preview.appendChild(stage);
     preview.appendChild(empty);
     panel.appendChild(preview);
-    panel.appendChild(history);
+    panel.appendChild(historyWrap);
 
     const updateSplit = (event) => {
         const rect = preview.getBoundingClientRect();
@@ -436,7 +488,21 @@ async function createCompareWidget(node) {
         node._no8dRightRef = left;
         renderCompare(node);
     });
-    node._no8dCompareEls = { root, panel, preview, stage, before, afterClip, after, handle, swapButton, empty, history };
+    historyToggle.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    historyToggle.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        node.properties = node.properties || {};
+        node.properties.no8d_ab_history_collapsed = !compareHistoryCollapsed(node);
+        syncHistoryCollapse(node);
+        renderCompare(node);
+        node.graph?.setDirtyCanvas?.(true, true);
+    });
+    node._no8dCompareEls = { root, panel, preview, stage, before, afterClip, after, handle, swapButton, empty, historyWrap, historyToggle, history };
     installNativeImageMenu(node, after);
     node._no8dSplit = 50;
     node._no8dHistory = loadHistory();

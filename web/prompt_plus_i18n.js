@@ -1,11 +1,10 @@
 import { app } from "../../scripts/app.js";
 import { no8dLocale, t } from "./no8d_i18n.js";
 
-const PROMPT_PLUS = "NO8DPromptPlus";
-const PROMPT_BATCH_PLUS = "NO8DBatchPromptPlus";
+const PROMPT_NODE = "NO8DBatchPromptPlus";
 const PROMPT_VIEW = "NO8DPromptView";
-const PROMPT_NODE_CLASSES = new Set([PROMPT_PLUS, PROMPT_BATCH_PLUS]);
-const STALE_PROMPT_PLUS_WIDGETS = new Set(["user_prompt", "token_range", "auto_run", "seed_control"]);
+const PROMPT_NODE_CLASSES = new Set([PROMPT_NODE]);
+const STALE_PROMPT_WIDGETS = new Set(["user_prompt", "token_range", "auto_run", "seed_control"]);
 const SEED_CONTROL_VALUES = new Set(["fixed", "randomize", "increment", "decrement"]);
 
 const WIDGET_LABELS = {
@@ -25,7 +24,7 @@ const SLOT_LABELS = {
     images: "promptImagesInput",
     image: "promptImageInput",
     positive: "promptPositiveOutput",
-    captions: "promptCaptionsOutput",
+    prompt: "promptOutput",
 };
 const PROMPT_RULE_DISPLAY = {
     "自然语言": "Natural language",
@@ -52,7 +51,7 @@ const LANGUAGE_DISPLAY = {
 };
 const LENGTH_VALUES = new Set([...Object.keys(LENGTH_DISPLAY), ...Object.values(LENGTH_DISPLAY)]);
 const LANGUAGE_VALUES = new Set([...Object.keys(LANGUAGE_DISPLAY), ...Object.values(LANGUAGE_DISPLAY)]);
-const PROMPT_PLUS_WIDGET_ORDER = ["prompt_rules", "style_preset", "length_preset", "output_language", "extra_rules", "seed"];
+const PROMPT_WIDGET_ORDER = ["prompt_rules", "style_preset", "length_preset", "output_language", "extra_rules", "seed"];
 let activeLocale = "";
 
 function nodeClass(node) {
@@ -62,7 +61,7 @@ function nodeClass(node) {
 function removeStalePromptPlusWidgets(node) {
     const cls = nodeClass(node);
     if (!PROMPT_NODE_CLASSES.has(cls) || !Array.isArray(node.widgets)) return;
-    node.widgets = node.widgets.filter((widget) => !STALE_PROMPT_PLUS_WIDGETS.has(widget.name) && !(cls === PROMPT_PLUS && widget.name === "output_language"));
+    node.widgets = node.widgets.filter((widget) => !STALE_PROMPT_WIDGETS.has(widget.name));
     const seed = node.widgets.find((widget) => widget.name === "seed");
     if (seed && !Number.isFinite(Number(seed.value))) seed.value = 0;
     const length = node.widgets.find((widget) => widget.name === "length_preset");
@@ -83,10 +82,10 @@ function removeStalePromptPlusWidgets(node) {
 
 function orderPromptPlusWidgets(node) {
     if (!PROMPT_NODE_CLASSES.has(nodeClass(node)) || !Array.isArray(node.widgets)) return;
-    const rank = new Map(PROMPT_PLUS_WIDGET_ORDER.map((name, index) => [name, index]));
+    const rank = new Map(PROMPT_WIDGET_ORDER.map((name, index) => [name, index]));
     const widgetRank = (widget) => {
         if (typeof widget.name === "string" && /control_after_generate/i.test(widget.name)) return 999;
-        return rank.has(widget.name) ? rank.get(widget.name) : PROMPT_PLUS_WIDGET_ORDER.length;
+        return rank.has(widget.name) ? rank.get(widget.name) : PROMPT_WIDGET_ORDER.length;
     };
     node.widgets.sort((a, b) => {
         const ai = widgetRank(a);
@@ -133,8 +132,7 @@ function applyWidgetLabels(node) {
     if (!PROMPT_NODE_CLASSES.has(cls) && cls !== PROMPT_VIEW) return;
     removeStalePromptPlusWidgets(node);
     orderPromptPlusWidgets(node);
-    if (cls === PROMPT_PLUS) node.title = t("promptPlusTitle");
-    if (cls === PROMPT_BATCH_PLUS) node.title = t("promptBatchPlusTitle");
+    if (cls === PROMPT_NODE) node.title = t("promptNodeTitle");
     if (cls === PROMPT_VIEW) node.title = t("promptViewTitle");
     for (const widget of node.widgets || []) {
         if (widget._no8dPromptSend) {
@@ -193,7 +191,7 @@ app.registerExtension({
         applyWidgetLabels(node);
     },
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (![PROMPT_PLUS, PROMPT_BATCH_PLUS, PROMPT_VIEW].includes(nodeData.name)) return;
+        if (![PROMPT_NODE, PROMPT_VIEW].includes(nodeData.name)) return;
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             if (onCreated) onCreated.apply(this, arguments);

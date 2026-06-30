@@ -538,6 +538,24 @@ async function loadInitialHistory(node) {
     }
 }
 
+function liteHistoryCollapsed(node) {
+    return !!node.properties?.no8d_inpainting_history_collapsed;
+}
+
+function syncLiteHistoryCollapse(node) {
+    const wrap = node._liteHistoryWrap;
+    const strip = node._liteHistoryStrip;
+    const toggle = node._liteHistoryToggle;
+    if (!wrap || !strip || !toggle) return;
+    const collapsed = liteHistoryCollapsed(node);
+    wrap.style.flex = collapsed ? "0 0 30px" : "1 1 0";
+    wrap.style.minHeight = collapsed ? "30px" : "44px";
+    wrap.style.padding = collapsed ? "0 44px" : "12px 10px 8px 64px";
+    strip.style.display = collapsed ? "none" : "flex";
+    toggle.textContent = collapsed ? "▴" : "▾";
+    toggle.title = collapsed ? t("expandHistory") : t("collapseHistory");
+}
+
 function renderHistory(node) {
     const strip = node._liteHistoryStrip;
     if (!strip) return;
@@ -569,6 +587,7 @@ function renderHistory(node) {
         });
         strip.appendChild(thumb);
     }
+    syncLiteHistoryCollapse(node);
 }
 
 function commitMask(node) {
@@ -1071,11 +1090,44 @@ function attach(node) {
     node._liteRefreshActions = refreshActions;
     wrap.appendChild(refreshActions);
     panel.appendChild(wrap);
+    const historyWrap = document.createElement("div");
+    historyWrap.style.cssText = "position:relative; flex:1 1 0; min-height:44px; padding:12px 10px 8px 64px; overflow:hidden; border-top:1px solid #333; background:#181818; box-sizing:border-box; pointer-events:none;";
+    const historyToggle = iconButton("▾", t("collapseHistory"), () => {
+        node.properties = node.properties || {};
+        node.properties.no8d_inpainting_history_collapsed = !liteHistoryCollapsed(node);
+        syncLiteHistoryCollapse(node);
+        draw(node);
+        node.graph?.setDirtyCanvas?.(true, true);
+    });
+    historyToggle.style.cssText = [
+        "position:absolute",
+        "left:10px",
+        "top:50%",
+        "transform:translateY(-50%)",
+        "width:34px",
+        "min-width:34px",
+        "height:24px",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "border:1px solid #333",
+        "border-radius:4px",
+        "background:rgba(24,24,24,0.9)",
+        "color:#dbeafe",
+        "font-size:16px",
+        "line-height:1",
+        "cursor:pointer",
+        "pointer-events:auto",
+        "box-sizing:border-box",
+    ].join(";");
     const historyStrip = document.createElement("div");
-    historyStrip.style.cssText = "display:flex; gap:12px; align-items:center; justify-content:center; flex:1 1 0; min-height:44px; padding:12px 10px 8px; overflow-x:auto; overflow-y:hidden; border-top:1px solid #333; background:#181818; box-sizing:border-box; pointer-events:none;";
-    panel.appendChild(historyStrip);
+    historyStrip.style.cssText = "display:flex; gap:12px; align-items:center; justify-content:center; width:100%; height:100%; overflow-x:auto; overflow-y:hidden; box-sizing:border-box; pointer-events:none;";
+    historyWrap.append(historyToggle, historyStrip);
+    panel.appendChild(historyWrap);
     node._liteCanvas = canvas;
     node._liteCanvasWrap = wrap;
+    node._liteHistoryWrap = historyWrap;
+    node._liteHistoryToggle = historyToggle;
     node._liteHistoryStrip = historyStrip;
     node._liteMask = { mode: findWidget(node, "mask_mode")?.value || "none", strokes: [], shapes: [] };
     clearMaskSilently(node);

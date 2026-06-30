@@ -15,14 +15,20 @@ It is designed for practical image iteration: adjust LoRA weights, draw local ma
 
 All nodes are available under the `NO8D-control` category.
 
+## User Guides
+
+- [6/25 user guide](https://www.patreon.com/no8d/posts/my-first-nodes-161975407?utm_medium=clipboard_copy&utm_source=copyLink&utm_campaign=postshare_creator&utm_content=join_link)
+- [6/29 user guide](https://www.patreon.com/no8d/posts/no8d-control-has-162321185?utm_medium=clipboard_copy&utm_source=copyLink&utm_campaign=postshare_creator&utm_content=join_link)
+
 ## Nodes
 
 - `NO8D-LoRA stack`
 - `NO8D-Inpainting`
 - `NO8D-A/B preview`
-- `NO8D-Prompt-plus`
-- `NO8D-Batch-Prompt-plus`
+- `NO8D-Load-images`
+- `NO8D-Prompt`
 - `NO8D-Prompt-view`
+- `NO8D save`
 
 ## Installation
 
@@ -49,13 +55,13 @@ Connect `positive`, `negative`, `vae`, and `latent` to `NO8D-Inpainting`. If LoR
 Prompt workflow:
 
 ```text
-Text or image -> NO8D-Prompt-plus -> NO8D-Prompt-view -> positive prompt input
+Text, image, or image batch -> NO8D-Prompt -> NO8D-Prompt-view or dataset save
 ```
 
 Batch caption workflow:
 
 ```text
-Image batch -> NO8D-Batch-Prompt-plus -> Save Image-Text (to Folder)
+NO8D-Load-images -> NO8D-Prompt -> NO8D save
 ```
 
 ## NO8D-LoRA Stack
@@ -117,52 +123,68 @@ Features:
 - Restore recent history within the current browser session.
 - Use temporary ComfyUI preview images instead of writing permanent files.
 
-## NO8D-Prompt-Plus
+## NO8D-Prompt
 
-`NO8D-Prompt-plus` uses a configured OpenAI-compatible API to generate a positive prompt.
+`NO8D-Prompt` uses a configured OpenAI-compatible API to expand text prompts or reverse-engineer one or more input images into captions.
 
-![NO8D-Prompt-plus illustration](docs/images/prompt-plus-node.png)
+![NO8D-Prompt illustration](docs/images/prompt-node.png)
 
 Inputs:
 
-- `text`: optional text input for prompt expansion.
-- `image`: optional image input for image caption reverse engineering.
+- `text`: optional text input for prompt expansion or image-caption guidance.
+- `images`: optional single-image or image-batch input for caption reverse engineering.
 - `prompt_rules`: choose a writing rule.
-- `seed`: controls variation in the generated prompt.
-- `extra_rules`: optional per-node instructions.
 - `style_preset`: choose the requested prompt style. Available presets are amateur photography, professional photography, cinematic photography, Japanese anime, American animation, illustration art, oil painting, photorealistic 3D, and stylized 3D cartoon.
+- `length_preset`: choose standard or detailed length.
+- `output_language`: choose English or Chinese output.
+- `seed`: controls variation in each generated prompt or caption.
+- `extra_rules`: optional per-node instructions.
 
-There is no built-in user prompt text box. Use `NO8D-Prompt-view`, another text node, or any compatible text output as the text input.
+Outputs:
+
+- `prompt`: a string list. Text-only input returns one item; image batches return one prompt per image.
 
 Built-in rule types:
 
 - `自然语言`: outputs one fluent modern-English positive prompt paragraph.
 - `json结构`: outputs readable structured English JSON.
 
-If both text and image are connected, the image is treated as visual evidence and the text is treated as user intent, correction, or emphasis.
+If both text and images are connected, images are treated as visual evidence and the text is treated as user intent, correction, or emphasis. Images are compressed before being sent to the API to reduce request size and latency.
 
-For image reverse engineering, the node compresses the input image before sending it to the API to reduce request size and latency.
+## NO8D-Load-images
 
-## NO8D-Batch-Prompt-Plus
+`NO8D-Load-images` loads multiple local images and outputs them as an image batch for captioning or dataset workflows.
 
-`NO8D-Batch-Prompt-plus` uses the same prompt rules, style presets, length presets, and API settings as `NO8D-Prompt-plus`, but reverse-engineers every image in an input batch.
+![NO8D-Load-images illustration](docs/images/load-images-node.png)
+
+Features:
+
+- Load images from the system file picker.
+- Add images by dragging files onto the node.
+- Preview selected images with adjustable thumbnails.
+- Select, multi-select, box-select, delete, and reorder loaded images.
+- Double-click an image to run a single-image output.
+
+The node preserves source filename metadata so `NO8D save` can reuse original filenames.
+
+## NO8D save
+
+`NO8D save` saves image and text pairs as an image-text dataset with configurable naming rules.
+
+![NO8D save illustration](docs/images/save-node.png)
 
 Inputs:
 
 - `images`: image batch input.
-- `prompt_rules`: choose a writing rule.
-- `style_preset`: choose the requested prompt style.
-- `length_preset`: choose standard or detailed length.
-- `output_language`: choose English or Chinese output.
-- `seed`: controls variation in each generated caption.
-- `extra_rules`: optional per-node instructions.
+- `text`: prompt/caption text input.
 
-Outputs:
+Options:
 
-- `captions`: a string list, one caption per image. Connect it to ComfyUI's built-in `Save Image-Text (to Folder)` node to save images and matching `.txt` captions.
-- `combined`: all captions joined into one readable text block for previewing with `NO8D-Prompt-view` or another text preview node.
-
-This node has no text input port. It is dedicated to batch image caption reverse engineering.
+- Choose output folder, image format, and quality.
+- Build filenames from ordered naming rules.
+- Use original filename, date + time, size class, or fixed text.
+- Drag the six-dot handle to reorder naming rules.
+- Duplicate filenames are resolved with a six-digit suffix.
 
 ## NO8D-Prompt-View
 
@@ -175,6 +197,14 @@ This node has no text input port. It is dedicated to batch image caption reverse
 - `Send`: queues downstream nodes with the edited text without rerunning the upstream prompt generation node.
 
 This node can also be used as a simple manual text input node.
+
+## Community
+
+- QQ group: `482570609`
+- WeChat: `fattyleoliu`
+
+<img src="docs/images/qq-group.png" alt="QQ group 482570609" width="320">
+<img src="docs/images/wechat.png" alt="WeChat fattyleoliu" width="240">
 
 ## Prompt API Settings
 

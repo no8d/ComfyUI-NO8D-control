@@ -104,7 +104,14 @@ def _load_image(path):
             image = image.point(lambda i: i * (1 / 255))
         image = image.convert("RGB")
         arr = np.asarray(image).astype(np.float32) / 255.0
-    return torch.from_numpy(arr)[None,]
+    tensor = torch.from_numpy(arr)[None,]
+    try:
+        tensor.no8d_source_stem = path.stem
+        tensor.no8d_source_name = path.name
+        tensor.no8d_source_path = str(path)
+    except Exception:
+        pass
+    return tensor
 
 
 def _normalize_to_uint8(image):

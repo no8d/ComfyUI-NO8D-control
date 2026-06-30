@@ -439,9 +439,9 @@ def _message_cache_text(messages):
 def _chat_completion(base_url, api_key, model, messages, temperature, max_tokens, seed=0):
     endpoint = _endpoint_from_base_url(base_url)
     if not endpoint:
-        raise ValueError("NO8D-Prompt-plus: API base URL is empty")
+        raise ValueError("NO8D-Prompt: API base URL is empty")
     if not str(model or "").strip():
-        raise ValueError("NO8D-Prompt-plus: model is empty")
+        raise ValueError("NO8D-Prompt: model is empty")
 
     payload = {
         "model": str(model).strip(),
@@ -466,20 +466,20 @@ def _chat_completion(base_url, api_key, model, messages, temperature, max_tokens
         hint = ""
         if "Model does not exist" in body or "model" in body.lower():
             hint = " Please open NO8D Prompt API Manager, validate the service again, and select an available model. Image reverse prompting also requires a vision-capable model."
-        raise RuntimeError(f"NO8D-Prompt-plus: API HTTP {exc.code}: {body[:800]}{hint}") from exc
+        raise RuntimeError(f"NO8D-Prompt: API HTTP {exc.code}: {body[:800]}{hint}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"NO8D-Prompt-plus: API request failed: {exc.reason}") from exc
+        raise RuntimeError(f"NO8D-Prompt: API request failed: {exc.reason}") from exc
 
     parsed = json.loads(raw)
     choices = parsed.get("choices") or []
     if not choices:
-        raise RuntimeError("NO8D-Prompt-plus: API returned no choices")
+        raise RuntimeError("NO8D-Prompt: API returned no choices")
     message = choices[0].get("message") or {}
     content = message.get("content") or choices[0].get("text") or ""
     if isinstance(content, list):
         content = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
     if not str(content).strip():
-        raise RuntimeError("NO8D-Prompt-plus: API returned empty content")
+        raise RuntimeError("NO8D-Prompt: API returned empty content")
     return str(content)
 
 
@@ -495,110 +495,6 @@ def _api_key_fingerprint(api_key):
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
-class NO8DPromptPlus:
-    _cache = {}
-    _last_by_node = {}
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        prompt_rule_names = prompt_config_manager.prompt_rule_names()
-        prompt_rule_inputs = prompt_rule_names + [
-            name for name in ("Natural language", "JSON structure") if name not in prompt_rule_names
-        ]
-        return {
-            "required": {
-                "prompt_rules": (prompt_rule_inputs, {"default": _RULE_NATURAL}),
-                "style_preset": (_STYLE_PRESET_INPUTS, {"default": "专业摄影"}),
-                "length_preset": (_LENGTH_PRESET_INPUTS, {"default": "标准"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True}),
-                "extra_rules": ("STRING", {"default": "", "multiline": True}),
-            },
-            "optional": {
-                "text": ("STRING", {"forceInput": True}),
-                "image": ("IMAGE",),
-            },
-            "hidden": {
-                "unique_id": "UNIQUE_ID",
-            },
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("positive",)
-    FUNCTION = "run"
-    CATEGORY = "NO8D-control"
-
-    @classmethod
-    def IS_CHANGED(cls, prompt_rules, style_preset="专业摄影", length_preset="标准", seed=0, extra_rules="", text=None, image=None, unique_id=None):
-        service, model_cfg = prompt_config_manager.current_service()
-        effective_seed = _safe_int(seed, 0)
-        image_data_url, image_hash = _image_to_data_url(image)
-        prompt = str(text or "").strip()
-        prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
-        style_preset = _normalize_style_preset(style_preset)
-        length_preset = _normalize_length_preset(length_preset)
-        payload = {
-            "prompt": prompt,
-            "prompt_rules": prompt_rule,
-            "prompt_rule_text": prompt_config_manager.prompt_rule_text(prompt_rule),
-            "style_preset": style_preset,
-            "style_preset_rule": _style_preset_rule(style_preset),
-            "length_preset": length_preset,
-            "length_preset_rule": _LENGTH_PRESET_RULES.get(length_preset, _LENGTH_PRESET_RULES["标准"]),
-            "service_id": service.get("id"),
-            "api_base_url": service.get("base_url", ""),
-            "model": model_cfg.get("name", ""),
-            "api_key": _api_key_fingerprint(service.get("api_key", "")),
-            "temperature": _safe_float(model_cfg.get("temperature"), 0.7),
-            "seed": effective_seed,
-            "extra_rules": extra_rules,
-            "image": image_hash,
-        }
-        return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
-
-    def run(self, prompt_rules, style_preset="专业摄影", length_preset="标准", seed=0, extra_rules="", text=None, image=None, unique_id=None):
-        node_key = str(unique_id or "default")
-        prompt = str(text or "").strip()
-        image_data_url, image_hash = _image_to_data_url(image)
-        if not prompt and not image_data_url:
-            return ("",)
-
-        service, model_cfg = prompt_config_manager.current_service()
-        api_base_url = service.get("base_url", "")
-        api_key = service.get("api_key", "") or os.getenv("NO8D_PROMPT_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
-        model = model_cfg.get("name", "")
-        temperature = _safe_float(model_cfg.get("temperature"), 0.7)
-        prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
-        if prompt_rule not in prompt_config_manager.prompt_rule_names():
-            prompt_rule = _RULE_NATURAL
-        style_preset = _normalize_style_preset(style_preset)
-        length_preset = _normalize_length_preset(length_preset)
-        max_tokens = _max_tokens_for_length(length_preset)
-        effective_seed = _safe_int(seed, 0)
-        messages = _build_messages(prompt, prompt_rule, extra_rules, effective_seed, image_data_url, style_preset, length_preset)
-        cache_payload = {
-            "messages": _message_cache_text(messages),
-            "service_id": service.get("id"),
-            "base_url": api_base_url,
-            "model": model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "seed": effective_seed,
-            "image": image_hash,
-        }
-        cache_key = hashlib.sha1(json.dumps(cache_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
-        if cache_key in self._cache:
-            result = self._cache[cache_key]
-        else:
-            raw = _chat_completion(api_base_url, api_key, model, messages, temperature, max_tokens, effective_seed)
-            result = _clean_prompt_output(raw, prompt_rule)
-            self._cache[cache_key] = result
-            while len(self._cache) > 64:
-                self._cache.pop(next(iter(self._cache)))
-
-        self._last_by_node[node_key] = result
-        return (result,)
-
-
 class NO8DBatchPromptPlus:
     _cache = {}
 
@@ -610,7 +506,6 @@ class NO8DBatchPromptPlus:
         ]
         return {
             "required": {
-                "images": ("IMAGE",),
                 "prompt_rules": (prompt_rule_inputs, {"default": _RULE_NATURAL}),
                 "style_preset": (_STYLE_PRESET_INPUTS, {"default": "专业摄影"}),
                 "length_preset": (_LENGTH_PRESET_INPUTS, {"default": "标准"}),
@@ -618,23 +513,29 @@ class NO8DBatchPromptPlus:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True}),
                 "extra_rules": ("STRING", {"default": "", "multiline": True}),
             },
+            "optional": {
+                "text": ("STRING", {"forceInput": True}),
+                "images": ("IMAGE",),
+            },
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("captions",)
+    RETURN_NAMES = ("prompt",)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "run"
     CATEGORY = "NO8D-control"
 
     @classmethod
-    def IS_CHANGED(cls, images, prompt_rules, style_preset="专业摄影", length_preset="标准", output_language="英文", seed=0, extra_rules=""):
+    def IS_CHANGED(cls, prompt_rules, style_preset="专业摄影", length_preset="标准", output_language="英文", seed=0, extra_rules="", text=None, images=None):
         service, model_cfg = prompt_config_manager.current_service()
         encoded = _images_to_data_urls(images)
+        prompt = str(text or "").strip()
         prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
         style_preset = _normalize_style_preset(style_preset)
         length_preset = _normalize_length_preset(length_preset)
         output_language = _normalize_output_language(output_language)
         payload = {
+            "prompt": prompt,
             "image_hashes": [image_hash for _, image_hash in encoded],
             "prompt_rules": prompt_rule,
             "prompt_rule_text": prompt_config_manager.prompt_rule_text(prompt_rule),
@@ -653,9 +554,10 @@ class NO8DBatchPromptPlus:
         }
         return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
-    def run(self, images, prompt_rules, style_preset="专业摄影", length_preset="标准", output_language="英文", seed=0, extra_rules=""):
+    def run(self, prompt_rules, style_preset="专业摄影", length_preset="标准", output_language="英文", seed=0, extra_rules="", text=None, images=None):
         encoded = _images_to_data_urls(images)
-        if not encoded:
+        prompt = str(text or "").strip()
+        if not encoded and not prompt:
             return ([],)
 
         service, model_cfg = prompt_config_manager.current_service()
@@ -671,11 +573,17 @@ class NO8DBatchPromptPlus:
         output_language = _normalize_output_language(output_language)
         max_tokens = _max_tokens_for_length(length_preset)
         base_seed = _safe_int(seed, 0)
-        captions = []
+        prompts = []
 
-        for index, (image_data_url, image_hash) in enumerate(encoded):
+        items = encoded or [("", "")]
+        for index, (image_data_url, image_hash) in enumerate(items):
             effective_seed = base_seed + index if base_seed else 0
-            instruction = f"Reverse-engineer image {index + 1} of {len(encoded)} into a high-quality prompt following the selected output rules."
+            if image_data_url:
+                instruction = f"Reverse-engineer image {index + 1} of {len(items)} into a high-quality prompt following the selected output rules."
+                if prompt:
+                    instruction += f"\nUser text, intent, correction, or emphasis:\n{prompt}"
+            else:
+                instruction = prompt
             messages = _build_messages(instruction, prompt_rule, extra_rules, effective_seed, image_data_url, style_preset, length_preset, output_language)
             cache_payload = {
                 "messages": _message_cache_text(messages),
@@ -697,9 +605,9 @@ class NO8DBatchPromptPlus:
                 self._cache[cache_key] = result
                 while len(self._cache) > 128:
                     self._cache.pop(next(iter(self._cache)))
-            captions.append(result)
+            prompts.append(result)
 
-        return (captions,)
+        return (prompts,)
 
 
 class NO8DPromptView:
@@ -758,13 +666,11 @@ class NO8DPromptView:
 
 
 NODE_CLASS_MAPPINGS = {
-    "NO8DPromptPlus": NO8DPromptPlus,
     "NO8DBatchPromptPlus": NO8DBatchPromptPlus,
     "NO8DPromptView": NO8DPromptView,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NO8DPromptPlus": "NO8D-Prompt-plus",
-    "NO8DBatchPromptPlus": "NO8D-Batch-Prompt-plus",
+    "NO8DBatchPromptPlus": "NO8D-Prompt",
     "NO8DPromptView": "NO8D-Prompt-view",
 }
