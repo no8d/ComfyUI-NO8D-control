@@ -221,6 +221,34 @@ def _images_to_data_urls(images):
         return []
 
 
+def _images_to_hashes(images):
+    if images is None:
+        return []
+    try:
+        arr = images
+        if isinstance(images, (list, tuple)):
+            hashes = []
+            for image in images:
+                if image is None:
+                    continue
+                item = image.detach().cpu().numpy() if hasattr(image, "detach") else np.asarray(image)
+                if item.ndim == 4:
+                    hashes.extend(hashlib.sha1(np.ascontiguousarray(frame).tobytes()).hexdigest() for frame in item)
+                elif item.ndim == 3:
+                    hashes.append(hashlib.sha1(np.ascontiguousarray(item).tobytes()).hexdigest())
+            return hashes
+        if hasattr(arr, "detach"):
+            arr = arr.detach().cpu().numpy()
+        arr = np.asarray(arr)
+        if arr.ndim == 3:
+            arr = arr[None, ...]
+        if arr.ndim != 4:
+            return []
+        return [hashlib.sha1(np.ascontiguousarray(item).tobytes()).hexdigest() for item in arr]
+    except Exception:
+        return []
+
+
 def _clean_palette(value, limit):
     if not isinstance(value, list):
         return []
@@ -339,6 +367,29 @@ def _clean_prompt_output(text, rule):
     return text
 
 
+def _with_text_prefix(result, prefix, rule):
+    prefix = str(prefix or "").strip()
+    result = str(result or "").strip()
+    if not prefix or not result:
+        return result
+
+    if prompt_config_manager.prompt_rule_mode(rule) == "json":
+        try:
+            obj = json.loads(result)
+            high_level = str(obj.get("high_level_description") or "").strip()
+            if high_level and not high_level.startswith(prefix):
+                obj["high_level_description"] = f"{prefix}, {high_level}"
+            elif not high_level:
+                obj["high_level_description"] = prefix
+            return json.dumps(obj, ensure_ascii=False, indent=2)
+        except Exception:
+            return result
+
+    if result.startswith(prefix):
+        return result
+    return f"{prefix}, {result}"
+
+
 def _natural_system_prompt(rule_name):
     rule_text = prompt_config_manager.prompt_rule_text(rule_name)
     return f"""
@@ -436,7 +487,79 @@ def _message_cache_text(messages):
     return "\n".join(parts)
 
 
-def _chat_completion(base_url, api_key, model, messages, temperature, max_tokens, seed=0):
+def _strip_data_url_prefix(data_url):
+    text = str(data_url or "")
+    if "," in text and text.lower().startswith("data:image"):
+        return text.split(",", 1)[1]
+    return text
+
+
+def _ollama_messages_from_openai(messages):
+    output = []
+    for message in messages:
+        role = message.get("role") or "user"
+        content = message.get("content")
+        if isinstance(content, list):
+            text_parts = []
+            images = []
+            for item in content:
+                if not isinstance(item, dict):
+                    text_parts.append(str(item))
+                    continue
+                if item.get("type") == "text":
+                    text_parts.append(str(item.get("text") or ""))
+                elif item.get("type") == "image_url":
+                    url = (item.get("image_url") or {}).get("url")
+                    if url:
+                        images.append(_strip_data_url_prefix(url))
+            clean = {"role": role, "content": "\n".join(part for part in text_parts if part).strip()}
+            if images:
+                clean["images"] = images
+            output.append(clean)
+        else:
+            output.append({"role": role, "content": str(content or "")})
+    return output
+
+
+def _ollama_chat(base_url, model, messages, temperature, max_tokens, seed=0):
+    base = str(base_url or "").strip().strip('"').strip("'").rstrip("/") or "http://localhost:11434"
+    if base.endswith("/v1"):
+        base = base[:-3].rstrip("/")
+    endpoint = base + "/api/chat"
+    payload = {
+        "model": str(model).strip(),
+        "messages": _ollama_messages_from_openai(messages),
+        "stream": False,
+        "options": {
+            "temperature": _safe_float(temperature, 0.7),
+            "num_predict": _safe_int(max_tokens, 800),
+        },
+    }
+    seed = _safe_int(seed, 0)
+    if seed:
+        payload["options"]["seed"] = seed
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(endpoint, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"NO8D-Prompt: Ollama HTTP {exc.code}: {body[:800]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"NO8D-Prompt: Ollama request failed: {exc.reason}") from exc
+    parsed = json.loads(raw)
+    message = parsed.get("message") if isinstance(parsed, dict) else None
+    content = (message or {}).get("content") if isinstance(message, dict) else ""
+    if not str(content or "").strip():
+        raise RuntimeError("NO8D-Prompt: Ollama returned empty content")
+    return str(content)
+
+
+def _chat_completion(base_url, api_key, model, messages, temperature, max_tokens, seed=0, service_type="openai_compatible"):
+    if str(service_type or "").strip().lower() == "ollama":
+        return _ollama_chat(base_url, model, messages, temperature, max_tokens, seed)
+
     endpoint = _endpoint_from_base_url(base_url)
     if not endpoint:
         raise ValueError("NO8D-Prompt: API base URL is empty")
@@ -528,7 +651,7 @@ class NO8DBatchPromptPlus:
     @classmethod
     def IS_CHANGED(cls, prompt_rules, style_preset="专业摄影", length_preset="标准", output_language="英文", seed=0, extra_rules="", text=None, images=None):
         service, model_cfg = prompt_config_manager.current_service()
-        encoded = _images_to_data_urls(images)
+        image_hashes = _images_to_hashes(images)
         prompt = str(text or "").strip()
         prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
         style_preset = _normalize_style_preset(style_preset)
@@ -536,7 +659,7 @@ class NO8DBatchPromptPlus:
         output_language = _normalize_output_language(output_language)
         payload = {
             "prompt": prompt,
-            "image_hashes": [image_hash for _, image_hash in encoded],
+            "image_hashes": image_hashes,
             "prompt_rules": prompt_rule,
             "prompt_rule_text": prompt_config_manager.prompt_rule_text(prompt_rule),
             "style_preset": style_preset,
@@ -545,6 +668,7 @@ class NO8DBatchPromptPlus:
             "length_preset_rule": _LENGTH_PRESET_RULES.get(length_preset, _LENGTH_PRESET_RULES["标准"]),
             "output_language": output_language,
             "service_id": service.get("id"),
+            "service_type": service.get("type", "openai_compatible"),
             "api_base_url": service.get("base_url", ""),
             "model": model_cfg.get("name", ""),
             "api_key": _api_key_fingerprint(service.get("api_key", "")),
@@ -564,6 +688,7 @@ class NO8DBatchPromptPlus:
         api_base_url = service.get("base_url", "")
         api_key = service.get("api_key", "") or os.getenv("NO8D_PROMPT_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
         model = model_cfg.get("name", "")
+        service_type = service.get("type", "openai_compatible")
         temperature = _safe_float(model_cfg.get("temperature"), 0.7)
         prompt_rule = prompt_config_manager.normalize_prompt_rule_name(prompt_rules)
         if prompt_rule not in prompt_config_manager.prompt_rule_names():
@@ -581,7 +706,12 @@ class NO8DBatchPromptPlus:
             if image_data_url:
                 instruction = f"Reverse-engineer image {index + 1} of {len(items)} into a high-quality prompt following the selected output rules."
                 if prompt:
-                    instruction += f"\nUser text, intent, correction, or emphasis:\n{prompt}"
+                    instruction += (
+                        "\nText input prefix / trigger words:\n"
+                        f"{prompt}\n"
+                        "Treat this text as fixed trigger words that should appear at the very beginning of the final caption. "
+                        "Do not rewrite or translate these trigger words; generate the remaining caption after them."
+                    )
             else:
                 instruction = prompt
             messages = _build_messages(instruction, prompt_rule, extra_rules, effective_seed, image_data_url, style_preset, length_preset, output_language)
@@ -600,11 +730,13 @@ class NO8DBatchPromptPlus:
             if cache_key in self._cache:
                 result = self._cache[cache_key]
             else:
-                raw = _chat_completion(api_base_url, api_key, model, messages, temperature, max_tokens, effective_seed)
+                raw = _chat_completion(api_base_url, api_key, model, messages, temperature, max_tokens, effective_seed, service_type)
                 result = _clean_prompt_output(raw, prompt_rule)
                 self._cache[cache_key] = result
                 while len(self._cache) > 128:
                     self._cache.pop(next(iter(self._cache)))
+            if image_data_url and prompt:
+                result = _with_text_prefix(result, prompt, prompt_rule)
             prompts.append(result)
 
         return (prompts,)

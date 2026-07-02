@@ -263,7 +263,16 @@ class PromptConfigManager:
                 changed = True
             else:
                 modes.setdefault(key, value)
-        data.setdefault("services", [])
+        services = data.setdefault("services", [])
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            service.setdefault("type", "openai_compatible")
+            service.setdefault("models", [])
+            service.setdefault("model_options", [])
+            if service.get("type") == "ollama" and not str(service.get("base_url") or "").strip():
+                service["base_url"] = "http://localhost:11434"
+                changed = True
         return data, changed
 
     def load_config(self):
@@ -321,7 +330,10 @@ class PromptConfigManager:
         service.setdefault("name", service_id)
         service.setdefault("type", "openai_compatible")
         service.setdefault("base_url", "")
+        if service.get("type") == "ollama" and not str(service.get("base_url") or "").strip():
+            service["base_url"] = "http://localhost:11434"
         service.setdefault("models", [])
+        service.setdefault("model_options", [])
 
         services = config.setdefault("services", [])
         for idx, existing in enumerate(services):

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-labelledby="title desc">
   <title id="title">NO8D-A/B preview node illustration</title>
-  <desc id="desc">An illustration of the A/B preview node showing a split image comparison and centered history thumbnails.</desc>
+  <desc id="desc">An illustration of the A/B preview node showing a split image comparison between two connected inputs.</desc>
   <rect width="980" height="420" rx="24" fill="#111820"/>
   <rect x="46" y="36" width="888" height="344" rx="18" fill="#252525" stroke="#424242"/>
   <rect x="46" y="36" width="888" height="42" rx="18" fill="#333"/>
@@ -35,5 +35,5 @@
     <rect x="312" y="0" width="42" height="24" rx="5" fill="#30465b" stroke="#67b7ff"/>
     <rect x="364" y="0" width="42" height="24" rx="5" fill="#30465b" stroke="#67b7ff"/>
   </g>
-  <text x="648" y="354" fill="#9db0c8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14">up to 8 centered history thumbnails</text>
+  <text x="648" y="354" fill="#9db0c8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14">two connected image inputs</text>
 </svg>

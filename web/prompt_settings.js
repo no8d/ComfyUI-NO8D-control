@@ -182,6 +182,32 @@ function uniqueServiceId(services, base = "custom") {
     return `${base}_${index}`;
 }
 
+const SERVICE_TYPES = [
+    { value: "openai_compatible", labelKey: "openaiCompatibleService" },
+    { value: "ollama", labelKey: "localLlmService" },
+];
+
+function defaultBaseUrlForType(type) {
+    return type === "ollama" ? "http://localhost:11434" : "";
+}
+
+function serviceTypeLabel(type) {
+    const item = SERVICE_TYPES.find((serviceType) => serviceType.value === type);
+    return item ? t(item.labelKey) : t("openaiCompatibleService");
+}
+
+function labeledSelect(labelText, options, value) {
+    const wrap = document.createElement("label");
+    wrap.style.cssText = "display:flex; flex-direction:column; gap:6px; min-width:0; color:var(--fg-color,#ddd); font-size:12px;";
+    const label = document.createElement("span");
+    label.textContent = labelText;
+    const input = select(options, value);
+    input.style.width = "100%";
+    wrap.append(label, input);
+    wrap.input = input;
+    return wrap;
+}
+
 function ruleItems(config) {
     const names = [];
     for (const rule of RULES) names.push(rule.value);
@@ -418,6 +444,7 @@ function showApiManager(initialConfig, onSaved) {
         selectedId: initialConfig.current_service || initialConfig.services?.[0]?.id || "",
         syncCurrent: null,
         modelLists: {},
+        selectTimer: null,
     };
 
     function selectedService() {
@@ -429,14 +456,62 @@ function showApiManager(initialConfig, onSaved) {
         editor.replaceChildren();
         for (const service of state.config.services) {
             const item = button(service.name || service.id);
+            const label = document.createElement("span");
+            label.textContent = service.name || service.id;
+            label.style.cssText = "display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+            item.replaceChildren(label);
             item.style.height = "50px";
             item.style.textAlign = "left";
             item.style.position = "relative";
             item.style.paddingRight = "38px";
             item.style.background = service.id === state.selectedId ? "#3b82f6" : "var(--comfy-input-bg,#222)";
-            item.onclick = () => {
-                state.selectedId = service.id;
-                render();
+            item.title = serviceTypeLabel(service.type || "openai_compatible");
+            item.onclick = (event) => {
+                if (event.detail > 1) return;
+                window.clearTimeout(state.selectTimer);
+                state.selectTimer = window.setTimeout(() => {
+                    if (state.selectedId !== service.id) {
+                        state.selectedId = service.id;
+                        render();
+                    }
+                }, 180);
+            };
+            item.ondblclick = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                window.clearTimeout(state.selectTimer);
+                const input = document.createElement("input");
+                input.value = service.name || service.id;
+                input.style.cssText = [
+                    "width:100%",
+                    "height:30px",
+                    "box-sizing:border-box",
+                    "border:1px solid var(--border-color,#444)",
+                    "border-radius:4px",
+                    "background:var(--comfy-input-bg,#111)",
+                    "color:var(--input-text,#eee)",
+                    "padding:0 8px",
+                    "font:inherit",
+                ].join(";");
+                let committed = false;
+                function commitRename() {
+                    if (committed) return;
+                    committed = true;
+                    const nextName = input.value.trim();
+                    if (nextName) service.name = nextName;
+                    render();
+                }
+                input.onkeydown = (keyEvent) => {
+                    if (keyEvent.key === "Enter") commitRename();
+                    if (keyEvent.key === "Escape") {
+                        committed = true;
+                        render();
+                    }
+                };
+                input.onblur = commitRename;
+                item.replaceChildren(input);
+                input.focus();
+                input.select();
             };
             if (!BUILTIN_SERVICES.has(service.id)) {
                 const removeService = button("x");
@@ -459,11 +534,12 @@ function showApiManager(initialConfig, onSaved) {
             const id = uniqueServiceId(state.config.services);
             state.config.services.push({
                 id,
-                name: "Custom API",
+                name: t("newServiceName"),
                 type: "openai_compatible",
                 base_url: "",
                 api_key: "",
                 models: [],
+                model_options: [],
             });
             state.selectedId = id;
             state.config.current_service = id;
@@ -480,21 +556,33 @@ function showApiManager(initialConfig, onSaved) {
             return;
         }
 
-        const name = field(t("serviceName"), service.name || "");
-        const baseUrl = field(t("baseUrl"), service.base_url || "");
+        service.type = service.type || "openai_compatible";
+        const typeWrap = labeledSelect(
+            t("serviceType"),
+            SERVICE_TYPES.map((item) => ({ value: item.value, label: t(item.labelKey) })),
+            service.type,
+        );
+        const baseUrl = field(t("baseUrl"), service.base_url || defaultBaseUrlForType(service.type));
         const row = document.createElement("div");
-        row.style.cssText = "display:grid; grid-template-columns:1fr 1fr; gap:14px;";
-        row.append(name, baseUrl);
+        row.style.cssText = "display:grid; grid-template-columns:minmax(180px, 240px); gap:18px; align-items:end;";
+        row.append(typeWrap);
         editor.appendChild(row);
 
         const apiKey = field(t("apiKey"), "", "password");
         apiKey.input.placeholder = service.api_key_masked || (service.api_key_exists ? t("savedApiKey") : t("pasteApiKey"));
         const testApi = button(t("validateApi"), true);
         const apiKeyRow = document.createElement("div");
-        apiKeyRow.style.cssText = "display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:10px; align-items:end;";
+        apiKeyRow.style.cssText = "display:grid; grid-template-columns:minmax(220px, 1fr) minmax(220px, 1fr) auto; gap:18px; align-items:end;";
         testApi.style.minWidth = "96px";
-        apiKeyRow.append(apiKey, testApi);
+        apiKeyRow.append(baseUrl, apiKey, testApi);
         editor.appendChild(apiKeyRow);
+
+        function syncTypeUi() {
+            const isLocal = typeWrap.input.value === "ollama";
+            if (isLocal && !baseUrl.input.value.trim()) baseUrl.input.value = defaultBaseUrlForType("ollama");
+            apiKey.input.disabled = isLocal;
+            apiKey.input.placeholder = isLocal ? t("notRequired") : (service.api_key_masked || (service.api_key_exists ? t("savedApiKey") : t("pasteApiKey")));
+        }
 
         const modelTitle = document.createElement("div");
         modelTitle.textContent = t("models");
@@ -504,10 +592,9 @@ function showApiManager(initialConfig, onSaved) {
         editor.append(modelTitle, modelList);
 
         function syncBase() {
-            service.name = name.input.value.trim() || service.id;
-            service.type = "openai_compatible";
-            service.base_url = baseUrl.input.value.trim();
-            service.api_key = apiKey.input.value.trim();
+            service.type = typeWrap.input.value || "openai_compatible";
+            service.base_url = baseUrl.input.value.trim() || defaultBaseUrlForType(service.type);
+            service.api_key = service.type === "ollama" ? "" : apiKey.input.value.trim();
         }
         state.syncCurrent = syncBase;
 
@@ -531,7 +618,11 @@ function showApiManager(initialConfig, onSaved) {
             modelList.appendChild(modelSelect);
         }
 
-        for (const input of [name.input, baseUrl.input, apiKey.input]) {
+        typeWrap.input.addEventListener("change", () => {
+            syncTypeUi();
+            syncBase();
+        });
+        for (const input of [baseUrl.input, apiKey.input]) {
             input.addEventListener("change", syncBase);
         }
         testApi.onclick = async () => {
@@ -555,6 +646,7 @@ function showApiManager(initialConfig, onSaved) {
             }
         };
 
+        syncTypeUi();
         renderModels();
     }
 

@@ -2,61 +2,19 @@ import { app } from "../../scripts/app.js";
 import { t } from "./no8d_i18n.js";
 
 const NODE_NAME = "NO8DABPreview";
-const MIN_WIDTH = 260;
+const MIN_WIDTH = 320;
 const MIN_HEIGHT = 320;
-const HISTORY_LIMIT = 8;
-const HISTORY_STORAGE_KEY = "NO8D_AB_PREVIEW_HISTORY";
+const EDGE_PAD = 10;
 
-const passThroughStyle = document.createElement("style");
-passThroughStyle.textContent = `
-    .dom-widget.no8d-compare-fit-widget { pointer-events: none !important; box-sizing: border-box; overflow: hidden; }
-    .no8d-compare-control { pointer-events: auto; }
+const legacyDomStyle = document.createElement("style");
+legacyDomStyle.textContent = `
+    .dom-widget.no8d-compare-fit-widget,
+    .dom-widget.no8d-compare-widget {
+        pointer-events: none !important;
+        overflow: hidden !important;
+    }
 `;
-document.head.appendChild(passThroughStyle);
-
-function menuOptionKey(option) {
-    if (option == null) return "";
-    return typeof option === "string" ? option : String(option.content || "");
-}
-
-function nativeImageMenuOptions(canvas, image) {
-    if (!image?.src || typeof globalThis.LiteGraph?.createNode !== "function") return [];
-    const helper = globalThis.LiteGraph.createNode("PreviewImage");
-    if (!helper || typeof helper.getExtraMenuOptions !== "function") return [];
-
-    const withoutImage = [];
-    helper.getExtraMenuOptions(canvas, withoutImage);
-    helper.imgs = [image];
-    helper.imageIndex = 0;
-    const withImage = [];
-    helper.getExtraMenuOptions(canvas, withImage);
-
-    const baseline = new Set(withoutImage.map(menuOptionKey));
-    const added = new Set();
-    return withImage.filter((option) => {
-        const key = menuOptionKey(option);
-        if (option == null || !key || baseline.has(key) || added.has(key)) return false;
-        added.add(key);
-        return true;
-    });
-}
-
-function installNativeImageMenu(node, image) {
-    const original = node.getExtraMenuOptions;
-    node.getExtraMenuOptions = function (canvas, options = []) {
-        const target = Array.isArray(options) ? options : [];
-        const returned = original?.call(this, canvas, target);
-        const existing = new Set(target.map(menuOptionKey));
-        for (const option of nativeImageMenuOptions(canvas, image)) {
-            const key = menuOptionKey(option);
-            if (!existing.has(key)) {
-                target.push(option);
-                existing.add(key);
-            }
-        }
-        return returned;
-    };
-}
+document.head.appendChild(legacyDomStyle);
 
 function isTargetNode(node) {
     const type = node?.constructor?.comfyClass || node?.comfyClass || node?.type;
@@ -65,10 +23,6 @@ function isTargetNode(node) {
 
 function imageRefs(refs) {
     return Array.isArray(refs) ? refs.filter((ref) => ref?.filename) : [];
-}
-
-function previewImageRefs(refs) {
-    return imageRefs(refs);
 }
 
 function imageKey(ref) {
@@ -80,461 +34,217 @@ function makeViewUrl(ref) {
     return `/view?${params.toString()}`;
 }
 
-function loadHistory() {
-    try {
-        const parsed = JSON.parse(sessionStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
-        return previewImageRefs(parsed).slice(-HISTORY_LIMIT);
-    } catch (_) {
-        return [];
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function fitRect(img, rect) {
+    if (!img?.naturalWidth || !img?.naturalHeight) return null;
+    const [, , boxW, boxH] = rect;
+    const scale = Math.min(boxW / img.naturalWidth, boxH / img.naturalHeight);
+    const w = Math.max(1, img.naturalWidth * scale);
+    const h = Math.max(1, img.naturalHeight * scale);
+    return [
+        rect[0] + (boxW - w) / 2,
+        rect[1] + (boxH - h) / 2,
+        w,
+        h,
+    ];
+}
+
+function drawContainedImage(ctx, img, rect) {
+    const fit = fitRect(img, rect);
+    if (!fit) return null;
+    ctx.drawImage(img, fit[0], fit[1], fit[2], fit[3]);
+    return fit;
+}
+
+function loadPreviewImage(node, slot, ref) {
+    const key = ref?.filename ? imageKey(ref) : "";
+    node._no8dABImages = node._no8dABImages || {};
+    if (!key) {
+        node._no8dABImages[slot] = null;
+        return;
     }
+    const existing = node._no8dABImages[slot];
+    if (existing?.key === key) return;
+    const img = new Image();
+    img.onload = () => app.graph?.setDirtyCanvas?.(true, true);
+    img.onerror = () => app.graph?.setDirtyCanvas?.(true, true);
+    img.src = makeViewUrl(ref);
+    node._no8dABImages[slot] = { key, ref, img };
 }
 
-function saveHistory(history) {
-    try {
-        sessionStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(previewImageRefs(history).slice(-HISTORY_LIMIT)));
-    } catch (_) {}
+function hasComparableImages(node) {
+    const images = node?._no8dABImages || {};
+    return Boolean(images.a?.img?.naturalWidth && images.b?.img?.naturalWidth);
 }
 
-function rememberHistory(node, refs) {
-    node._no8dHistory = node._no8dHistory || loadHistory();
-    for (const ref of previewImageRefs(refs)) {
-        const key = imageKey(ref);
-        node._no8dHistory = node._no8dHistory.filter((item) => imageKey(item) !== key);
-        node._no8dHistory.push({
-            filename: ref.filename,
-            subfolder: ref.subfolder || "",
-            type: ref.type || "temp",
-        });
+function updateNodeSplit(node, pos) {
+    const widget = node?._no8dCompareWidget;
+    if (!widget || !hasComparableImages(node)) return false;
+    return widget.setSplitFromPos(pos);
+}
+
+function isInImageArea(node, pos) {
+    const widget = node?._no8dCompareWidget;
+    const rect = widget?.rect;
+    if (!rect) return false;
+    const top = Math.max(0, Math.min(rect[1], (node.inputs?.length || 0) * 20 + 28));
+    const bottom = rect[1] + rect[3];
+    if (pos[0] < rect[0] || pos[0] > rect[0] + rect[2]) return false;
+    if (pos[1] < top || pos[1] > bottom) return false;
+    return true;
+}
+
+class NO8DCompareWidget {
+    constructor(node) {
+        this.type = "custom";
+        this.name = "no8d_ab_preview";
+        this.options = {};
+        this.value = "";
+        this.node = node;
+        this.dragging = false;
+        this.rect = [0, 0, MIN_WIDTH, MIN_HEIGHT];
+        this.imageRect = null;
     }
-    node._no8dHistory = node._no8dHistory.slice(-HISTORY_LIMIT);
-    saveHistory(node._no8dHistory);
-}
 
-function setImage(img, ref) {
-    if (!img) return;
-    if (ref?.filename) {
-        const key = imageKey(ref);
-        if (img._no8dLoadedKey !== key || !img.complete) {
-            img.style.visibility = "hidden";
+    computeSize(width) {
+        return [Math.max(MIN_WIDTH, width), MIN_HEIGHT];
+    }
+
+    setSplitFromPos(pos) {
+        const rect = this.imageRect || this.rect;
+        if (!rect?.[2]) return false;
+        this.node._no8dSplit = ((pos[0] - rect[0]) / rect[2]) * 100;
+        app.graph?.setDirtyCanvas?.(true, true);
+        return true;
+    }
+
+    nodePosFromWidgetPos(pos) {
+        if (!Array.isArray(pos)) return pos;
+        return [pos[0] + this.rect[0], pos[1] + this.rect[1]];
+    }
+
+    mouse(event, pos) {
+        const nodePos = this.nodePosFromWidgetPos(pos);
+        if (!isInImageArea(this.node, nodePos)) return false;
+        const type = String(event?.type || "");
+        if (type.includes("down") && event.button === 0) {
+            this.dragging = hasComparableImages(this.node);
+            if (this.dragging) this.setSplitFromPos(nodePos);
+            return true;
         }
-        img.onload = () => {
-            img.style.visibility = "visible";
-            img._no8dLoadedKey = key;
-        };
-        img.src = makeViewUrl(ref);
-        if (img.complete) {
-            img.style.visibility = "visible";
-            img._no8dLoadedKey = key;
+        if (type.includes("move")) {
+            if (!(event.buttons & 1)) {
+                this.dragging = false;
+                return true;
+            }
+            if (this.dragging && hasComparableImages(this.node)) this.setSplitFromPos(nodePos);
+            return true;
         }
-        img.style.display = "block";
-    } else {
-        img.removeAttribute("src");
-        img.style.visibility = "hidden";
-        img.style.display = "none";
+        if (type.includes("up") || type.includes("cancel") || type.includes("leave")) {
+            this.dragging = false;
+            return true;
+        }
+        return true;
+    }
+
+    draw(ctx, node, width, y) {
+        const fullWidth = node.size?.[0] || width;
+        const fullHeight = node.size?.[1] || MIN_HEIGHT;
+        const rect = [
+            EDGE_PAD,
+            y + EDGE_PAD,
+            Math.max(1, fullWidth - EDGE_PAD * 2),
+            Math.max(1, fullHeight - y - EDGE_PAD * 2),
+        ];
+        this.rect = rect;
+        this.imageRect = null;
+
+        ctx.save();
+        ctx.fillStyle = "#101010";
+        ctx.fillRect(rect[0], rect[1], rect[2], rect[3]);
+
+        const images = node._no8dABImages || {};
+        const a = images.a?.img;
+        const b = images.b?.img;
+        const hasA = Boolean(a?.naturalWidth);
+        const hasB = Boolean(b?.naturalWidth);
+
+        if (!hasA && !hasB) {
+            ctx.fillStyle = "#ddd";
+            ctx.font = "12px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(t("abNoComparableImage"), rect[0] + rect[2] / 2, rect[1] + rect[3] / 2);
+            ctx.restore();
+            return;
+        }
+
+        if (hasA && !hasB) {
+            this.imageRect = drawContainedImage(ctx, a, rect);
+            ctx.restore();
+            return;
+        }
+        if (!hasA && hasB) {
+            this.imageRect = drawContainedImage(ctx, b, rect);
+            ctx.restore();
+            return;
+        }
+
+        const baseRect = fitRect(a, rect) || rect;
+        this.imageRect = baseRect;
+        drawContainedImage(ctx, b, baseRect);
+
+        const splitX = baseRect[0] + baseRect[2] * (node._no8dSplit ?? 50) / 100;
+        const imageLeft = baseRect[0];
+        const imageRight = baseRect[0] + baseRect[2];
+        const clippedSplitX = clamp(splitX, imageLeft, imageRight);
+        if (clippedSplitX > imageLeft) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(imageLeft, baseRect[1], clippedSplitX - imageLeft, baseRect[3]);
+            ctx.clip();
+            drawContainedImage(ctx, a, baseRect);
+            ctx.restore();
+        }
+
+        if (splitX >= imageLeft && splitX <= imageRight) {
+            ctx.strokeStyle = "rgba(255,255,255,0.6)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(splitX, baseRect[1]);
+            ctx.lineTo(splitX, baseRect[1] + baseRect[3]);
+            ctx.stroke();
+        }
+        ctx.restore();
     }
 }
 
-function renderCompare(node) {
-    const els = node._no8dCompareEls;
-    if (!els) return;
-    syncCompareFrame(node);
-
-    const left = node._no8dLeftRef || node._no8dCurrentRef;
-    const right = node._no8dRightRef || node._no8dSelectedRef || left;
-    setImage(els.before, right);
-    setImage(els.after, left);
-
-    const hasImage = Boolean(left?.filename);
-    els.empty.style.display = hasImage ? "none" : "block";
-    els.stage.style.display = hasImage ? "flex" : "none";
-    els.swapButton.style.display = hasImage ? "flex" : "none";
-    els.swapButton.title = "Swap visible images";
-    els.afterClip.style.clipPath = `inset(0 ${100 - node._no8dSplit}% 0 0)`;
-    els.handle.style.left = `${node._no8dSplit}%`;
+function installWidget(node) {
+    if (node._no8dCompareWidget || typeof node.addCustomWidget !== "function") return;
+    node._no8dSplit = node._no8dSplit ?? 50;
+    node._no8dCompareWidget = node.addCustomWidget(new NO8DCompareWidget(node));
+    node.size = node.size || [MIN_WIDTH, MIN_HEIGHT];
+    node.size[0] = Math.max(node.size[0] || MIN_WIDTH, MIN_WIDTH);
+    node.size[1] = Math.max(node.size[1] || MIN_HEIGHT, MIN_HEIGHT);
 }
 
-function syncCompareFrame(node) {
-    const els = node._no8dCompareEls;
-    if (!els) return;
-
-    const wrapper = els.root.closest(".dom-widget");
-    if (wrapper) {
-        wrapper.classList.remove("no8d-compare-widget");
-        wrapper.classList.add("no8d-compare-fit-widget");
-        wrapper.style.boxSizing = "border-box";
-        wrapper.style.overflow = "hidden";
+function removeLegacyDomWidgets(node) {
+    if (!node) return;
+    if (node._no8dCompareEls?.root) {
+        node._no8dCompareEls.root.remove?.();
+        node._no8dCompareEls = null;
     }
-    els.root.style.width = "100%";
-    els.root.style.maxWidth = "100%";
-    els.root.style.height = "100%";
-}
-
-function compareHistoryCollapsed(node) {
-    return !!node.properties?.no8d_ab_history_collapsed;
-}
-
-function syncHistoryCollapse(node) {
-    const els = node._no8dCompareEls;
-    if (!els?.historyWrap || !els.history || !els.historyToggle) return;
-    const collapsed = compareHistoryCollapsed(node);
-    els.historyWrap.style.flex = collapsed ? "0 0 30px" : "1 1 0";
-    els.historyWrap.style.minHeight = collapsed ? "30px" : "44px";
-    els.historyWrap.style.padding = collapsed ? "0 44px" : "12px 10px 8px 64px";
-    els.history.style.display = collapsed ? "none" : "flex";
-    els.historyToggle.textContent = collapsed ? "▴" : "▾";
-    els.historyToggle.title = collapsed ? t("expandHistory") : t("collapseHistory");
-}
-
-function renderHistory(node) {
-    const els = node._no8dCompareEls;
-    if (!els) return;
-
-    els.history.innerHTML = "";
-    for (const ref of node._no8dHistory || []) {
-        const thumb = document.createElement("img");
-        thumb.src = makeViewUrl(ref);
-        thumb.title = ref.filename || "";
-        thumb.classList.add("no8d-compare-control");
-        thumb.style.cssText = [
-            "height:100%",
-            "aspect-ratio:1/1",
-            "object-fit:cover",
-            "flex:0 0 auto",
-            "box-sizing:border-box",
-            "cursor:pointer",
-            "background:#111",
-            imageKey(ref) === imageKey(node._no8dSelectedRef) ? "border:2px solid #3b82f6" : "border:1px solid #333",
-        ].join(";");
-        thumb.addEventListener("pointerdown", (event) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-        });
-        thumb.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            node._no8dSelectedRef = ref;
-            node._no8dRightRef = ref;
-            node._no8dFollowPrevious = imageKey(ref) === imageKey(node._no8dPreviousRef);
-            renderCompare(node);
-            renderHistory(node);
-        });
-        thumb.addEventListener("contextmenu", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            event.stopImmediatePropagation?.();
-        });
-        els.history.appendChild(thumb);
-    }
-    syncHistoryCollapse(node);
-    if (!compareHistoryCollapsed(node)) els.history.scrollLeft = els.history.scrollWidth;
-}
-
-async function createCompareWidget(node) {
-    const root = document.createElement("div");
-    root.style.cssText = [
-        "width:100%",
-        "max-width:100%",
-        "height:100%",
-        "position:relative",
-        "box-sizing:border-box",
-        "overflow:hidden",
-        "pointer-events:none",
-    ].join(";");
-    root.dataset.no8dCompareRoot = "1";
-    root._no8dCompareNode = node;
-
-    const panel = document.createElement("div");
-    panel.style.cssText = [
-        "position:absolute",
-        "inset:0",
-        "width:100%",
-        "height:100%",
-        "display:flex",
-        "flex-direction:column",
-        "background:#101010",
-        "overflow:hidden",
-        "box-sizing:border-box",
-        "pointer-events:none",
-    ].join(";");
-    root.appendChild(panel);
-
-    const preview = document.createElement("div");
-    preview.style.cssText = [
-        "position:relative",
-        "flex:9 1 0",
-        "min-height:0",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "background:#111",
-        "overflow:hidden",
-    ].join(";");
-
-    const stage = document.createElement("div");
-    stage.style.cssText = [
-        "position:relative",
-        "width:100%",
-        "height:100%",
-        "display:none",
-        "align-items:center",
-        "justify-content:center",
-        "overflow:hidden",
-    ].join(";");
-
-    const before = document.createElement("img");
-    before.style.cssText = [
-        "position:absolute",
-        "inset:0",
-        "width:100%",
-        "height:100%",
-        "object-fit:contain",
-        "object-position:center",
-        "user-select:none",
-        "pointer-events:none",
-    ].join(";");
-
-    const afterClip = document.createElement("div");
-    afterClip.style.cssText = [
-        "position:absolute",
-        "inset:0",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "overflow:hidden",
-        "pointer-events:none",
-    ].join(";");
-
-    const after = document.createElement("img");
-    after.style.cssText = [
-        "position:absolute",
-        "inset:0",
-        "width:100%",
-        "height:100%",
-        "object-fit:contain",
-        "object-position:center",
-        "user-select:none",
-        "pointer-events:none",
-    ].join(";");
-
-    const handle = document.createElement("div");
-    handle.classList.add("no8d-compare-control");
-    handle.style.cssText = [
-        "position:absolute",
-        "top:0",
-        "bottom:0",
-        "width:24px",
-        "transform:translateX(-12px)",
-        "background:linear-gradient(90deg, transparent 11px, #58a6ff 11px, #58a6ff 13px, transparent 13px)",
-        "cursor:ew-resize",
-        "touch-action:none",
-        "user-select:none",
-        "pointer-events:auto",
-        "z-index:3",
-    ].join(";");
-
-    const knob = document.createElement("div");
-    knob.textContent = "\u2194";
-    knob.style.cssText = [
-        "position:absolute",
-        "left:50%",
-        "top:50%",
-        "transform:translate(-50%, -50%)",
-        "width:24px",
-        "height:24px",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "border:1px solid #58a6ff",
-        "border-radius:4px",
-        "background:#1f2937",
-        "color:#fff",
-        "font-size:14px",
-        "line-height:1",
-        "box-sizing:border-box",
-    ].join(";");
-    handle.appendChild(knob);
-
-    const swapButton = document.createElement("button");
-    swapButton.classList.add("no8d-compare-control");
-    swapButton.type = "button";
-    swapButton.textContent = "\u21c4";
-    swapButton.style.cssText = [
-        "position:absolute",
-        "left:10px",
-        "bottom:10px",
-        "width:48px",
-        "height:48px",
-        "display:none",
-        "align-items:center",
-        "justify-content:center",
-        "border:1px solid #333",
-        "border-radius:4px",
-        "background:rgba(24,24,24,0.86)",
-        "color:#fff",
-        "font-size:36px",
-        "line-height:1",
-        "cursor:pointer",
-        "pointer-events:auto",
-        "z-index:4",
-        "box-sizing:border-box",
-    ].join(";");
-
-    const empty = document.createElement("div");
-    empty.textContent = t("abNoComparableImage");
-    empty.style.cssText = "color:#ddd; font-size:12px; text-align:center;";
-
-    const historyWrap = document.createElement("div");
-    historyWrap.style.cssText = [
-        "flex:1 1 0",
-        "min-height:44px",
-        "position:relative",
-        "padding:12px 10px 8px 64px",
-        "border-top:1px solid #222",
-        "background:#181818",
-        "box-sizing:border-box",
-        "overflow:hidden",
-    ].join(";");
-
-    const historyToggle = document.createElement("button");
-    historyToggle.classList.add("no8d-compare-control");
-    historyToggle.type = "button";
-    historyToggle.style.cssText = [
-        "position:absolute",
-        "left:10px",
-        "top:50%",
-        "transform:translateY(-50%)",
-        "width:34px",
-        "height:24px",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "border:1px solid #333",
-        "border-radius:4px",
-        "background:rgba(24,24,24,0.9)",
-        "color:#dbeafe",
-        "font-size:16px",
-        "line-height:1",
-        "cursor:pointer",
-        "pointer-events:auto",
-        "box-sizing:border-box",
-    ].join(";");
-
-    const history = document.createElement("div");
-    history.style.cssText = [
-        "width:100%",
-        "height:100%",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "gap:12px",
-        "overflow-x:auto",
-        "overflow-y:hidden",
-        "box-sizing:border-box",
-    ].join(";");
-    historyWrap.append(historyToggle, history);
-
-    afterClip.appendChild(after);
-    stage.appendChild(before);
-    stage.appendChild(afterClip);
-    stage.appendChild(handle);
-    stage.appendChild(swapButton);
-    preview.appendChild(stage);
-    preview.appendChild(empty);
-    panel.appendChild(preview);
-    panel.appendChild(historyWrap);
-
-    const updateSplit = (event) => {
-        const rect = preview.getBoundingClientRect();
-        const split = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 100;
-        node._no8dSplit = Math.min(100, Math.max(0, split));
-        renderCompare(node);
-    };
-    let dragPointerId = null;
-    const dragSplit = (event) => {
-        if (event.pointerId !== dragPointerId) return;
-        if (!node._no8dCurrentRef?.filename) return;
-        event.preventDefault();
-        event.stopPropagation();
-        updateSplit(event);
-    };
-    const stopDragging = (event) => {
-        if (event.pointerId !== dragPointerId) return;
-        event.preventDefault();
-        event.stopPropagation();
-        try { handle.releasePointerCapture(event.pointerId); } catch (_) {}
-        dragPointerId = null;
-    };
-    handle.addEventListener("pointerdown", (event) => {
-        if (event.button !== 0 || !node._no8dCurrentRef?.filename) return;
-        dragPointerId = event.pointerId;
-        try { handle.setPointerCapture(event.pointerId); } catch (_) {}
-        dragSplit(event);
+    if (!Array.isArray(node.widgets)) return;
+    node.widgets = node.widgets.filter((widget) => {
+        if (widget?.name !== "no8d_compare_slider") return true;
+        widget.element?.remove?.();
+        widget.inputEl?.remove?.();
+        widget.domElement?.remove?.();
+        return false;
     });
-    handle.addEventListener("pointermove", dragSplit);
-    handle.addEventListener("pointerup", stopDragging);
-    handle.addEventListener("pointercancel", stopDragging);
-    swapButton.addEventListener("pointerdown", (event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-    });
-    swapButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const left = node._no8dLeftRef || node._no8dCurrentRef;
-        const right = node._no8dRightRef || node._no8dSelectedRef || left;
-        node._no8dLeftRef = right;
-        node._no8dRightRef = left;
-        renderCompare(node);
-    });
-    historyToggle.addEventListener("pointerdown", (event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-    });
-    historyToggle.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        node.properties = node.properties || {};
-        node.properties.no8d_ab_history_collapsed = !compareHistoryCollapsed(node);
-        syncHistoryCollapse(node);
-        renderCompare(node);
-        node.graph?.setDirtyCanvas?.(true, true);
-    });
-    node._no8dCompareEls = { root, panel, preview, stage, before, afterClip, after, handle, swapButton, empty, historyWrap, historyToggle, history };
-    installNativeImageMenu(node, after);
-    node._no8dSplit = 50;
-    node._no8dHistory = loadHistory();
-    node._no8dSelectedRef = node._no8dHistory[node._no8dHistory.length - 1] || null;
-
-    const widget = node.addDOMWidget("no8d_compare_slider", "preview", root, {
-        serialize: false,
-        hideOnZoom: false,
-    });
-    widget.serialize = false;
-    node._no8dCompareWidget = widget;
-    widget.computeLayoutSize = () => ({
-        minWidth: MIN_WIDTH,
-        minHeight: MIN_HEIGHT,
-        maxWidth: 1_000_000,
-        maxHeight: 1_000_000,
-    });
-    const markWrapper = () => {
-        syncCompareFrame(node);
-    };
-    markWrapper();
-    requestAnimationFrame(markWrapper);
-
-    renderHistory(node);
-    if (node._no8dSelectedRef) {
-        node._no8dCurrentRef = node._no8dSelectedRef;
-        node._no8dPreviousRef = node._no8dSelectedRef;
-        node._no8dLeftRef = node._no8dSelectedRef;
-        node._no8dRightRef = node._no8dSelectedRef;
-        node._no8dFollowPrevious = true;
-    }
-    renderCompare(node);
 }
 
 app.registerExtension({
@@ -543,43 +253,59 @@ app.registerExtension({
         if (nodeData.name !== NODE_NAME) return;
         const onResize = nodeType.prototype.onResize;
         nodeType.prototype.onResize = function () {
+            removeLegacyDomWidgets(this);
             onResize?.apply(this, arguments);
-            if (!this._no8dCompareEls) return;
-            syncCompareFrame(this);
-            renderCompare(this);
             app.graph?.setDirtyCanvas?.(true, true);
+        };
+        const onMouseDown = nodeType.prototype.onMouseDown;
+        nodeType.prototype.onMouseDown = function (event, pos, canvas) {
+            if (!isTargetNode(this)) return onMouseDown?.apply(this, arguments);
+            if (!isInImageArea(this, pos)) return onMouseDown?.apply(this, arguments);
+            if (event.button === 0 && hasComparableImages(this)) {
+                this._no8dABDragging = true;
+                updateNodeSplit(this, pos);
+            }
+            return true;
+        };
+        const onMouseMove = nodeType.prototype.onMouseMove;
+        nodeType.prototype.onMouseMove = function (event, pos, canvas) {
+            if (!isTargetNode(this)) return onMouseMove?.apply(this, arguments);
+            if (!(event.buttons & 1)) {
+                this._no8dABDragging = false;
+                return onMouseMove?.apply(this, arguments);
+            }
+            if (this._no8dABDragging && hasComparableImages(this)) {
+                updateNodeSplit(this, pos);
+                return true;
+            }
+            return onMouseMove?.apply(this, arguments);
+        };
+        const onMouseUp = nodeType.prototype.onMouseUp;
+        nodeType.prototype.onMouseUp = function (event, pos, canvas) {
+            if (isTargetNode(this) && this._no8dABDragging) {
+                this._no8dABDragging = false;
+                return true;
+            }
+            return onMouseUp?.apply(this, arguments);
+        };
+        const onMouseLeave = nodeType.prototype.onMouseLeave;
+        nodeType.prototype.onMouseLeave = function () {
+            return onMouseLeave?.apply(this, arguments);
         };
     },
     async nodeCreated(node) {
-        if (!isTargetNode(node) || typeof node.addDOMWidget !== "function") return;
-        await createCompareWidget(node);
+        if (!isTargetNode(node)) return;
+        removeLegacyDomWidgets(node);
+        installWidget(node);
 
         const originalOnExecuted = node.onExecuted;
         node.onExecuted = function (message) {
+            removeLegacyDomWidgets(this);
             originalOnExecuted?.call(this, message);
-            const currentRefs = previewImageRefs(message?.a_images);
-            const previousRefs = previewImageRefs(message?.b_images);
-            const previousRef = previousRefs[previousRefs.length - 1] || this._no8dCurrentRef;
-            const shouldFollowPrevious = !this._no8dRightRef
-                || this._no8dFollowPrevious
-                || imageKey(this._no8dRightRef) === imageKey(this._no8dPreviousRef);
-            this._no8dCurrentRef = currentRefs[currentRefs.length - 1] || null;
-            this._no8dPreviousRef = previousRef;
-            this._no8dLeftRef = this._no8dCurrentRef;
-            rememberHistory(this, currentRefs);
-            if (shouldFollowPrevious) {
-                this._no8dSelectedRef = this._no8dPreviousRef || this._no8dCurrentRef;
-                this._no8dRightRef = this._no8dSelectedRef;
-                this._no8dFollowPrevious = true;
-            }
-            renderCompare(this);
-            renderHistory(this);
-            requestAnimationFrame(() => {
-                syncCompareFrame(this);
-                renderCompare(this);
-                renderHistory(this);
-                app.graph?.setDirtyCanvas?.(true, true);
-            });
+            const aRefs = imageRefs(message?.a_images);
+            const bRefs = imageRefs(message?.b_images);
+            loadPreviewImage(this, "a", aRefs[aRefs.length - 1]);
+            loadPreviewImage(this, "b", bRefs[bRefs.length - 1]);
             app.graph?.setDirtyCanvas?.(true, true);
         };
     },

@@ -109,7 +109,6 @@ async function queueEditedPrompt(node, editedText, sendSeq) {
 function sendEditedText(node) {
     const edited = findWidget(node, "edited_text");
     if (!edited) return;
-    setWidget(findWidget(node, "auto_output"), false);
     const nextSeq = String(Date.now());
     node.graph?.setDirtyCanvas?.(true, true);
     app?.canvas?.setDirty?.(true, true);

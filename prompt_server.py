@@ -31,6 +31,13 @@ def _models_endpoint_from_base_url(base_url):
     return url + "/models"
 
 
+def _ollama_base_url(base_url):
+    url = str(base_url or "").strip().strip('"').strip("'").rstrip("/") or "http://localhost:11434"
+    if url.endswith("/v1"):
+        url = url[:-3].rstrip("/")
+    return url
+
+
 def _service_with_saved_key(service):
     service = dict(service or {})
     old = prompt_config_manager.load_config()
@@ -41,8 +48,37 @@ def _service_with_saved_key(service):
     return service
 
 
+def _fetch_ollama_model_names(service):
+    service = _service_with_saved_key(service)
+    endpoint = _ollama_base_url(service.get("base_url")) + "/api/tags"
+    request = urllib.request.Request(endpoint, headers={"Accept": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code}: {body[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Request failed: {exc.reason}") from exc
+
+    parsed = json.loads(raw)
+    items = parsed.get("models") if isinstance(parsed, dict) else []
+    if not isinstance(items, list):
+        raise RuntimeError("Ollama did not return a model list")
+    names = []
+    for item in items:
+        name = item.get("name") if isinstance(item, dict) else str(item)
+        name = str(name or "").strip()
+        if name and name not in names:
+            names.append(name)
+    names.sort(key=str.lower)
+    return names
+
+
 def _fetch_model_names(service):
     service = _service_with_saved_key(service)
+    if str(service.get("type") or "").strip().lower() == "ollama":
+        return _fetch_ollama_model_names(service)
     endpoint = _models_endpoint_from_base_url(service.get("base_url"))
     if not endpoint:
         raise ValueError("Base URL is empty")

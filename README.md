@@ -47,7 +47,8 @@ No frontend build step is required. The nodes use ComfyUI's existing Python and 
 
 ```text
 Checkpoint Loader
-    MODEL -> NO8D-LoRA stack -> MODEL -> NO8D-Inpainting -> IMAGE -> NO8D-A/B preview
+    MODEL -> NO8D-LoRA stack -> MODEL -> NO8D-Inpainting -> IMAGE
+    IMAGE A + IMAGE B -> NO8D-A/B preview
 ```
 
 Connect `positive`, `negative`, `vae`, and `latent` to `NO8D-Inpainting`. If LoRA control is not needed, connect the original model directly to `NO8D-Inpainting`.
@@ -89,7 +90,7 @@ This node works with ordinary LoRAs and Slider LoRAs. NO8D publishes Slider LoRA
 
 ## NO8D-Inpainting
 
-`NO8D-Inpainting` combines KSampler-style sampling, image preview, mask drawing, and limited local-edit history.
+`NO8D-Inpainting` combines KSampler-style sampling, image preview, and mask drawing.
 
 It does not load LoRAs by itself. LoRA changes should come from `NO8D-LoRA stack` or another upstream model node.
 
@@ -103,15 +104,12 @@ Controls:
 - Brush and lasso mask tools
 - Brush size, feather, mask color, and denoise strength
 - Invert mask and clear mask
-- Session history strip
 
-Clearing the mask accepts the current edited result as the new base image for the next local edit. Before clearing, changing LoRA weight or sampling settings recomputes the current masked edit from the same base image.
-
-History is session-only and uses ComfyUI preview references. It does not write permanent images into this repository.
+When a mask tool is enabled, the node temporarily locks the seed so the base image stays stable while drawing. Turning the mask tool off restores the previous seed mode.
 
 ## NO8D-A/B Preview
 
-`NO8D-A/B preview` compares the current image against the previous image or a selected session-history image.
+`NO8D-A/B preview` compares two connected image inputs.
 
 ![NO8D-A/B preview illustration](docs/images/ab-preview-node.png)
 
@@ -119,8 +117,6 @@ Features:
 
 - Drag the split line to compare two images.
 - Swap A/B sides.
-- Keep up to 8 session-history images.
-- Restore recent history within the current browser session.
 - Use temporary ComfyUI preview images instead of writing permanent files.
 
 ## NO8D-Prompt
@@ -240,8 +236,6 @@ The extension keeps custom frontend behavior narrow and relies on standard Comfy
 ## Notes
 
 - LoRA weight changes are linear at the model delta level, but visual results are not guaranteed to change linearly.
-- Runtime edit state is stored in the active node instance. Restarting ComfyUI clears in-memory edit history.
-- `NO8D-A/B preview` keeps temporary session history only.
 - Backend node IDs are kept stable to avoid breaking existing workflows.
 
 ## Feedback

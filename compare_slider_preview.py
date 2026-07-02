@@ -2,14 +2,13 @@ import nodes as comfy_nodes
 
 
 class NO8DABPreview:
-    def __init__(self):
-        self._last_images = None
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {
-                "images": ("IMAGE",),
+            "required": {},
+            "optional": {
+                "image_a": ("IMAGE",),
+                "image_b": ("IMAGE",),
             },
             "hidden": {
                 "prompt": "PROMPT",
@@ -22,16 +21,22 @@ class NO8DABPreview:
     OUTPUT_NODE = True
     CATEGORY = "NO8D-control"
 
-    def preview(self, images, prompt=None, extra_pnginfo=None):
+    def preview(self, image_a=None, image_b=None, prompt=None, extra_pnginfo=None):
         saver = comfy_nodes.PreviewImage()
-        ui = saver.save_images(
-            images,
-            filename_prefix="NO8DABPreview",
-        )
-        current_images = ui["ui"]["images"]
-        previous_images = self._last_images or current_images
-        self._last_images = current_images
-        return {"ui": {"a_images": current_images, "b_images": previous_images}}
+        result = {"a_images": [], "b_images": []}
+        if image_a is not None:
+            a_ui = saver.save_images(
+                image_a,
+                filename_prefix="NO8DABPreview_A",
+            )
+            result["a_images"] = a_ui["ui"]["images"]
+        if image_b is not None:
+            b_ui = saver.save_images(
+                image_b,
+                filename_prefix="NO8DABPreview_B",
+            )
+            result["b_images"] = b_ui["ui"]["images"]
+        return {"ui": result}
 
 
 NODE_CLASS_MAPPINGS = {"NO8DABPreview": NO8DABPreview}
